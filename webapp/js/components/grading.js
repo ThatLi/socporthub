@@ -151,7 +151,7 @@ export async function renderGrading(slot, user, proposal, refresh) {
       });
     });
     if (!editable) return;
-    const form = slot.querySelector("form");
+    const form = slot.querySelector(".grading-form");
     async function save(submit) {
       const feedback = form.querySelector(".grading-feedback");
       const buttons = [...form.querySelectorAll("button")];
