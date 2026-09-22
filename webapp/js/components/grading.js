@@ -76,7 +76,18 @@ export async function renderGrading(slot, user, proposal, refresh) {
       : `<p>Evidence folder is being prepared.</p>${data.drive_error ? `<p class="field-hint">${esc(data.drive_error)}</p>` : ""}<button class="btn btn-secondary" type="button" data-retry-evidence>Retry folder setup</button>`;
     slot.innerHTML = `<section class="card grading-card">
       <div class="grading-heading"><div><span class="grading-eyebrow">POST-EVENT REVIEW</span><h2>${heading}</h2></div><span class="badge badge-${data.status}">${data.status === "final" ? "Final" : "Grading"}</span></div>
-      ${data.status === "grading" ? `<div class="grading-deadline" role="status"><strong data-grading-countdown></strong><span>Submit by ${new Date(data.deadline).toLocaleString()}. You have 2 weeks from the start of grading.</span></div>` : `<div class="grading-complete" role="status">Self-assessment submitted. ${data.admin_submitted_at ? completeLabel : `Ready for ${reviewLabel}.`}</div>`}
+      ${data.status === "grading" ? `<div class="grading-deadline" role="status">
+          <strong data-grading-countdown></strong>
+          <span>Submit by ${new Date(data.deadline).toLocaleString()}. You have 2 weeks from the start of grading.</span>
+          ${isAdmin ? `<div class="grading-extend">
+              <button type="button" class="btn-link" data-show-extend>Extend deadline</button>
+              <form class="grading-extend-form" hidden>
+                <input type="date" data-extend-deadline min="${new Date(new Date(data.deadline).getTime() + 86400000).toISOString().slice(0, 10)}" required />
+                <button class="btn btn-secondary" type="submit">Confirm</button>
+                <span class="grading-extend-feedback"></span>
+              </form>
+            </div>` : ""}
+        </div>` : `<div class="grading-complete" role="status">Self-assessment submitted. ${data.admin_submitted_at ? completeLabel : `Ready for ${reviewLabel}.`}</div>`}
       ${grader ? summary(selfAssessmentTitle, data.user_assessment, rubric, data.user_submitted_at) : ""}
       ${hidePeerForm ? `<div class="grading-actions"><button class="btn" type="button" data-show-peer-grading>${revealLabel}</button></div>` : ""}
       ${editable ? `<form class="grading-form" novalidate ${hidePeerForm ? "hidden" : ""}>
@@ -92,6 +103,25 @@ export async function renderGrading(slot, user, proposal, refresh) {
         ${data.drive_url ? `<div class="grading-evidence"><div class="grading-evidence-icon" aria-hidden="true">↗</div><div><h3>Photo evidence & proposal PDF</h3>${evidenceActions}</div></div>` : ""}`}
     </section>`;
     if (data.status === "grading") countdown(slot, data.deadline);
+    slot.querySelector("[data-show-extend]")?.addEventListener("click", (event) => {
+      slot.querySelector(".grading-extend-form")?.removeAttribute("hidden");
+      event.target.hidden = true;
+    });
+    slot.querySelector(".grading-extend-form")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.target.querySelector("button[type=submit]");
+      const feedback = slot.querySelector(".grading-extend-feedback");
+      const deadline = slot.querySelector("[data-extend-deadline]").value;
+      feedback.textContent = "";
+      button.disabled = true;
+      try {
+        await api.post(`/api/proposals/${proposal.id}/grading/extend`, { deadline });
+        await refresh();
+      } catch (err) {
+        feedback.textContent = err.message;
+        button.disabled = false;
+      }
+    });
     slot.querySelector("[data-show-peer-grading]")?.addEventListener("click", (event) => {
       slot.querySelector(".grading-form")?.removeAttribute("hidden");
       event.target.closest(".grading-actions")?.remove();

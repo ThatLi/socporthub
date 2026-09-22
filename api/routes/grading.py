@@ -1,5 +1,6 @@
 import json
-from datetime import timedelta
+from datetime import time as time_of_day, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -7,10 +8,10 @@ from sqlalchemy.orm import Session
 from api.auth import get_current_user
 from api.config import get_settings
 from api.database import get_db
-from api.models import Proposal, ProposalGrading, ProposalStatus, ProposalStatusHistory, User, UserRole
+from api.models import GradingNotification, Proposal, ProposalGrading, ProposalStatus, ProposalStatusHistory, User, UserRole
 from api.routes.proposals import get_visible_proposal
 from api.services.google_drive import folder_url, provision_evidence
-from api.services.grading import AssessmentRequest, RUBRICS, aware, process_grading_notifications, queue_notice, utcnow, validate_assessment
+from api.services.grading import AssessmentRequest, GradingExtendRequest, RUBRICS, aware, process_grading_notifications, queue_notice, utcnow, validate_assessment
 
 router = APIRouter(prefix="/api/proposals", tags=["grading"])
 
@@ -24,6 +25,16 @@ def can_grade_proposal(user: User, proposal: Proposal) -> bool:
     return user.role == UserRole.admin or (
         user.id != proposal.submitted_by and proposal.committee_id in user.committee_ids
     )
+
+
+def _normalize_deadline(deadline):
+    """A bare <input type="date"> round-trips as midnight naive — treat that as "by
+    end of that day" rather than midnight, then store everything as UTC."""
+    if deadline.tzinfo is None:
+        if deadline.time() == time_of_day.min:
+            deadline = deadline.replace(hour=23, minute=59, second=59)
+        deadline = deadline.replace(tzinfo=ZoneInfo(get_settings().app_timezone))
+    return deadline.astimezone(ZoneInfo("UTC"))
 
 
 def grading_out(db, proposal, user):
@@ -108,6 +119,34 @@ async def save_grading(proposal_id: int, req: AssessmentRequest, db: Session = D
             queue_notice(db, grading, "submitted")
     db.commit()
     await process_grading_notifications(db)
+    return grading_out(db, proposal, user)
+
+
+@router.post("/{proposal_id}/grading/extend", dependencies=[Depends(enabled)])
+async def extend_grading_deadline(
+    proposal_id: int, req: GradingExtendRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    proposal = get_visible_proposal(db, user, proposal_id)
+    if user.role != UserRole.admin:
+        raise HTTPException(403, "Only admins can extend a grading deadline")
+    grading = db.query(ProposalGrading).filter_by(proposal_id=proposal.id).with_for_update().first()
+    if grading is None:
+        raise HTTPException(409, "Grading has not been opened for this proposal")
+    if grading.user_submitted_at is not None:
+        raise HTTPException(409, "The self-assessment has already been submitted; there is nothing to extend")
+    new_deadline = _normalize_deadline(req.deadline)
+    if new_deadline <= aware(grading.deadline):
+        raise HTTPException(400, "The new deadline must be later than the current deadline")
+    grading.deadline = new_deadline
+    # Drop 7/3/1-day reminders queued against the old deadline (sent or not) so they
+    # get recomputed, and can fire again, relative to the new one.
+    db.query(GradingNotification).filter(
+        GradingNotification.proposal_id == proposal.id,
+        GradingNotification.milestone.in_(["7", "3", "1"]),
+    ).delete(synchronize_session=False)
+    db.commit()
+    await process_grading_notifications(db)
+    db.refresh(proposal)
     return grading_out(db, proposal, user)
 
 

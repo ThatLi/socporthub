@@ -324,6 +324,12 @@ a {
 .grading-deadline strong { font-size: 18px; font-variant-numeric: tabular-nums; }
 .grading-deadline span { font-size: 12px; line-height: 1.5; }
 .grading-overdue { background: var(--red-bg); color: var(--red-text); border-color: #efaaaa; }
+.btn-link { background: none; border: none; padding: 0; font: inherit; font-size: 12px; font-weight: 600; color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; align-self: flex-start; }
+.grading-extend { margin-top: 2px; }
+.grading-extend-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.grading-extend-form input[type="date"] { font: inherit; font-size: 12px; padding: 6px 8px; border: 1px solid #f2cf85; border-radius: 6px; background: #fffbef; color: #80571e; }
+.grading-extend-form .btn { width: auto; padding: 7px 12px; font-size: 12px; }
+.grading-extend-feedback { font-size: 12px; color: var(--red-text); flex-basis: 100%; }
 .grading-complete { padding: 14px; margin: 14px 0 20px; border-radius: 10px; background: var(--green-bg); color: var(--green-text); font-size: 13px; }
 .grading-scale { padding: 12px 14px; background: #f5f3fb; border-radius: 8px; font-size: 12px; line-height: 1.6; color: #66588d; }
 .grading-field { border: 1px solid var(--border); border-radius: 10px; margin: 22px 0; padding: 14px 16px 16px; min-width: 0; }

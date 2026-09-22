@@ -14,6 +14,11 @@
   private draft and submit their assessment after the user's submission.
 - Submitted assessments are locked. Late user submissions remain accepted;
   overdue proposals show a banner until submitted.
+- An admin can push the 14-day deadline further out (`POST
+  /api/proposals/:id/grading/extend`, only while the self-assessment is still
+  outstanding) — the new date must be later than the current one. Extending
+  drops any already-queued 7/3/1-day Telegram reminders for the old deadline so
+  they get recomputed, and can fire again, against the new one.
 - Merch has no grading rubric. Pubs is a Social category; Welfare committees
   continue to use Event and Initiative.
 

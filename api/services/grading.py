@@ -46,6 +46,11 @@ class AssessmentRequest(BaseModel):
     submit: bool = False
 
 
+class GradingExtendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    deadline: datetime
+
+
 def validate_assessment(req, category):
     rubric = RUBRICS[category]
     if set(req.ratings) - set(rubric["fields"]):

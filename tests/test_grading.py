@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -214,6 +214,39 @@ def test_reminders_are_durable_scoped_and_stop_at_final(grading_client, days):
         count = db.query(GradingNotification).count()
         asyncio.run(process_grading_notifications(db, now=deadline - timedelta(hours=12)))
         assert db.query(GradingNotification).count() == count
+
+
+def test_admin_can_extend_deadline_and_stale_reminders_are_cleared(grading_client):
+    c = grading_client
+    pid = proposal()
+    start(c, pid)
+    with session() as db:
+        grading = db.get(ProposalGrading, pid)
+        old_deadline = aware(grading.deadline)
+        when = old_deadline - timedelta(days=3) + timedelta(minutes=1)
+        asyncio.run(process_grading_notifications(db, now=when))
+        assert db.query(GradingNotification).filter_by(proposal_id=pid, milestone="3").count() == 2
+
+    # Non-admin cannot extend.
+    assert c.post(f"/api/proposals/{pid}/grading/extend", json={"deadline": "2099-01-01"}, headers=auth_header(1001)).status_code == 403
+
+    # Must move strictly later than the current deadline.
+    earlier = (old_deadline - timedelta(days=1)).date().isoformat()
+    assert c.post(f"/api/proposals/{pid}/grading/extend", json={"deadline": earlier}, headers=auth_header(999)).status_code == 400
+
+    later = (old_deadline + timedelta(days=7)).date().isoformat()
+    resp = c.post(f"/api/proposals/{pid}/grading/extend", json={"deadline": later}, headers=auth_header(999))
+    assert resp.status_code == 200
+    assert datetime.fromisoformat(resp.json()["deadline"]) > old_deadline
+
+    with session() as db:
+        # Stale 3-day reminders from the old deadline are gone so they can be
+        # recomputed (and fire again) relative to the new one.
+        assert db.query(GradingNotification).filter_by(proposal_id=pid, milestone="3").count() == 0
+
+    # Once the self-assessment is submitted, the deadline can no longer move.
+    save(c, pid, complete())
+    assert c.post(f"/api/proposals/{pid}/grading/extend", json={"deadline": "2099-01-01"}, headers=auth_header(999)).status_code == 409
 
 
 def test_failed_delivery_retries_and_admin_copy_can_be_disabled(grading_client, monkeypatch):
