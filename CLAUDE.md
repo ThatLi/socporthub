@@ -44,8 +44,15 @@ Social-then-Welfare via `committee_portfolio()` in `api/portfolio.py`, inside a
 collapsible picker), give users a real inbox for those admin-sent reminders, and
 restructure the shared Reminders tab into an **Inbox** (top, always expanded) plus a
 collapsible **Outbox** (renamed from "outgoing reminders" — shorter, pairs with
-Inbox) for both roles. Don't assume any admin-to-user reminder path, a `direction`
-field on `Reminder`, or an Inbox/Outbox split exists until it's actually in the code.
+Inbox) for both roles. It also adds an optional **deadline** on a broadcast reminder
+with a per-recipient "mark as done" action, plus scheduled Telegram nudges at
+send-time, 3-days-left, and 1-day-left (skipping anyone who's already marked done) —
+reusing the grading reminder scheduler's delivery-receipt pattern
+(`api/services/grading.py:process_grading_notifications`,
+`api/services/scheduled_notifications.py`, `docs/grading.md` "Reminders") rather than
+inventing a new one. Don't assume any admin-to-user reminder path, a `direction`
+field on `Reminder`, a deadline/done column, or an Inbox/Outbox split exists until
+it's actually in the code.
 
 **Calendar deviates from the spec**: it does not use the Google Calendar API (that
 requires a GCP billing account). Events are stored in our own `calendar_events` table

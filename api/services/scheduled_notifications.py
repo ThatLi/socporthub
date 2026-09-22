@@ -38,6 +38,19 @@ async def grading_loop():
         await asyncio.sleep(60)
 
 
+async def reminder_nudge_loop() -> None:
+    from api.services.reminder_broadcasts import process_reminder_nudges
+    while True:
+        try:
+            with SessionLocal() as db:
+                await process_reminder_nudges(db)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Reminder nudge scheduler failed; will retry")
+        await asyncio.sleep(60)
+
+
 async def collection_reminder_loop() -> None:
     last_notified: date | None = None
     while True:

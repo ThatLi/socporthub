@@ -2,7 +2,7 @@ from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from api.models import Portfolio, ProposalCategory, ProposalStatus, ReminderTargetType, UserRole, UserStatus
+from api.models import Portfolio, ProposalCategory, ProposalStatus, ReminderDirection, ReminderTargetType, UserRole, UserStatus
 
 
 # --- Auth ---
@@ -273,14 +273,40 @@ class ReminderCreate(BaseModel):
     target_id: int | None = None
 
 
+class ReminderBroadcastCreate(BaseModel):
+    message: str
+    committee_ids: list[int] = Field(min_length=1)
+    deadline: datetime | None = None
+
+
+class ReminderCommitteeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
+class ReminderRecipientOut(BaseModel):
+    user_id: int
+    name: str
+    is_read: bool
+    is_done: bool
+    completed_at: datetime | None
+
+
 class ReminderOut(BaseModel):
     id: int
+    direction: ReminderDirection
     from_user: int
     sender_name: str | None
     message: str
     target_type: ReminderTargetType
     target_id: int | None
     is_read: bool
+    is_done: bool | None = None
+    deadline: datetime | None = None
+    committees: list[ReminderCommitteeOut] = []
+    recipients: list[ReminderRecipientOut] | None = None
     created_at: datetime
 
 

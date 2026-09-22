@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="Social Port Hub API")
 collection_reminder_task = None
 grading_task = None
+reminder_nudge_task = None
 
 
 @app.middleware("http")
@@ -24,11 +25,12 @@ async def disable_webapp_asset_caching(request: Request, call_next):
 
 @app.on_event("startup")
 async def start_scheduled_notifications() -> None:
-    global collection_reminder_task, grading_task
+    global collection_reminder_task, grading_task, reminder_nudge_task
     from api.config import get_settings
     if get_settings().environment == "production":
-        from api.services.scheduled_notifications import collection_reminder_loop
+        from api.services.scheduled_notifications import collection_reminder_loop, reminder_nudge_loop
         collection_reminder_task = asyncio.create_task(collection_reminder_loop())
+        reminder_nudge_task = asyncio.create_task(reminder_nudge_loop())
     if get_settings().grading_enabled:
         from api.services.scheduled_notifications import grading_loop
         grading_task = asyncio.create_task(grading_loop())
@@ -40,6 +42,8 @@ async def stop_scheduled_notifications() -> None:
         collection_reminder_task.cancel()
     if grading_task:
         grading_task.cancel()
+    if reminder_nudge_task:
+        reminder_nudge_task.cancel()
 
 app.include_router(auth.router)
 app.include_router(bug_reports.router)

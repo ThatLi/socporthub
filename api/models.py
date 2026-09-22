@@ -58,6 +58,11 @@ class ReminderTargetType(str, enum.Enum):
     general = "general"
 
 
+class ReminderDirection(str, enum.Enum):
+    to_admin = "to_admin"
+    to_user = "to_user"
+
+
 class Portfolio(str, enum.Enum):
     social = "social"
     welfare = "welfare"
@@ -273,19 +278,78 @@ class CalendarEvent(Base):
 
 
 class Reminder(Base):
+    """A user->admin nudge (direction=to_admin, the original shape), or an
+    admin->CCA broadcast (direction=to_user). A broadcast's actual recipients and
+    their per-user read/done state live in ReminderRecipient — this row is the
+    composed message plus (for a broadcast) which committees it targeted."""
     __tablename__ = "reminders"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     from_user: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
+    direction: Mapped[ReminderDirection] = mapped_column(
+        Enum(ReminderDirection, native_enum=False), default=ReminderDirection.to_admin, nullable=False
+    )
     target_type: Mapped[ReminderTargetType] = mapped_column(
         Enum(ReminderTargetType, native_enum=False), nullable=False
     )
     target_id: Mapped[int | None] = mapped_column(Integer)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Only set on a to_user broadcast; drives the scheduled 3-day/1-day nudges below.
+    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     sender: Mapped["User"] = relationship()
+    target_committees: Mapped[list["ReminderTargetCommittee"]] = relationship(
+        back_populates="reminder", cascade="all, delete-orphan"
+    )
+    recipients: Mapped[list["ReminderRecipient"]] = relationship(
+        back_populates="reminder", cascade="all, delete-orphan"
+    )
+
+
+class ReminderTargetCommittee(Base):
+    """Which CCAs an admin broadcast (Reminder.direction=to_user) was sent to."""
+    __tablename__ = "reminder_target_committees"
+
+    reminder_id: Mapped[int] = mapped_column(ForeignKey("reminders.id"), primary_key=True)
+    committee_id: Mapped[int] = mapped_column(ForeignKey("committees.id"), primary_key=True)
+
+    reminder: Mapped["Reminder"] = relationship(back_populates="target_committees")
+    committee: Mapped["Committee"] = relationship()
+
+
+class ReminderRecipient(Base):
+    """Per-recipient inbox state for a broadcast reminder: read + done, independent
+    of every other recipient's state on the same broadcast."""
+    __tablename__ = "reminder_recipients"
+    __table_args__ = (UniqueConstraint("reminder_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reminder_id: Mapped[int] = mapped_column(ForeignKey("reminders.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    reminder: Mapped["Reminder"] = relationship(back_populates="recipients")
+    user: Mapped["User"] = relationship()
+
+
+class ReminderNudge(Base):
+    """Durable per-recipient scheduled nudge delivery (3-day / 1-day windows before
+    a broadcast reminder's deadline) — same shape as GradingNotification, so a
+    restart or slow scheduler tick can't double-send."""
+    __tablename__ = "reminder_nudges"
+    __table_args__ = (UniqueConstraint("reminder_recipient_id", "milestone"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reminder_recipient_id: Mapped[int] = mapped_column(ForeignKey("reminder_recipients.id"), nullable=False)
+    milestone: Mapped[str] = mapped_column(String(16), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    recipient: Mapped["ReminderRecipient"] = relationship()
 
 
 class EmailDraft(Base):

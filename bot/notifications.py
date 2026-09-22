@@ -118,6 +118,15 @@ async def notify_admins_reminder(sender_name: str, message: str, portfolio: Port
         await send_message(admin_id, text)
 
 
+async def notify_user_reminder_broadcast(
+    telegram_id: int, sender_name: str, message: str, deadline_text: str | None = None
+) -> None:
+    text = f"🔔 Reminder from <b>{escape(sender_name)}</b>\n\n{escape(message)}"
+    if deadline_text:
+        text += f"\n\n⏰ Due: {escape(deadline_text)}"
+    await send_message(telegram_id, text)
+
+
 async def send_proposal_announcement(
     chat_id: int,
     poster_data: bytes | None,
