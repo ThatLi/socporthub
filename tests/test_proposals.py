@@ -1,8 +1,18 @@
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+
+from api.database import get_db
+from api.main import app
+from api.models import Proposal, ProposalComment, ProposalStatusHistory
 from tests.conftest import auth_header
 
 ADMIN = 999
 USER_A = 1001
 USER_B = 1002
+
+
+def session():
+    return contextmanager(app.dependency_overrides[get_db])()
 
 
 def register(client, telegram_id, email):
@@ -121,6 +131,73 @@ def test_proposal_lifecycle_and_status_guardrails(client):
         headers=auth_header(USER_A),
     )
     assert edit_blocked.status_code == 403
+
+
+def test_status_change_and_new_comment_bump_proposal_to_top(client):
+    register(client, ADMIN, "admin@example.com")
+    _approve_user(client, USER_A, "a@example.com")
+
+    older = client.post(
+        "/api/proposals",
+        json={"title": "Older Event", "description": "First", "event_date": "2026-10-01"},
+        headers=auth_header(USER_A),
+    ).json()["id"]
+    newer = client.post(
+        "/api/proposals",
+        json={"title": "Newer Event", "description": "Second", "event_date": "2026-10-02"},
+        headers=auth_header(USER_A),
+    ).json()["id"]
+
+    # SQLite's CURRENT_TIMESTAMP only has 1-second resolution, so pin explicit,
+    # well-separated timestamps rather than relying on real wall-clock gaps between
+    # these calls.
+    now = datetime.now(timezone.utc)
+    with session() as db:
+        db.get(Proposal, older).created_at = now - timedelta(days=2)
+        db.get(Proposal, newer).created_at = now - timedelta(days=1)
+        db.commit()
+
+    # Freshly created: newest-created proposal leads.
+    listing = client.get("/api/proposals", headers=auth_header(ADMIN)).json()
+    assert [p["id"] for p in listing] == [newer, older]
+
+    # A status change on the older proposal should bump it back to the top.
+    sent_back = client.patch(
+        f"/api/proposals/{older}",
+        json={"status": "needs_action", "comment": "Please add more detail"},
+        headers=auth_header(ADMIN),
+    )
+    assert sent_back.status_code == 200
+    with session() as db:
+        history = (
+            db.query(ProposalStatusHistory)
+            .filter_by(proposal_id=older)
+            .order_by(ProposalStatusHistory.id.desc())
+            .first()
+        )
+        history.created_at = now
+        db.commit()
+    listing = client.get("/api/proposals", headers=auth_header(ADMIN)).json()
+    assert [p["id"] for p in listing] == [older, newer]
+
+    # A new comment on the (now second) newer proposal should bump it back up.
+    commented = client.post(
+        f"/api/proposals/{newer}/comments",
+        json={"body": "Any update?"},
+        headers=auth_header(ADMIN),
+    )
+    assert commented.status_code == 201
+    with session() as db:
+        comment = (
+            db.query(ProposalComment)
+            .filter_by(proposal_id=newer)
+            .order_by(ProposalComment.id.desc())
+            .first()
+        )
+        comment.created_at = now + timedelta(minutes=1)
+        db.commit()
+    listing = client.get("/api/proposals", headers=auth_header(ADMIN)).json()
+    assert [p["id"] for p in listing] == [newer, older]
 
 
 def test_admin_can_clear_event_date_after_finished(client):

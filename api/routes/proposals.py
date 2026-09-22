@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from fastapi import Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
@@ -125,6 +126,15 @@ def list_proposals(
     if proposal_status is not None:
         query = query.filter(Proposal.status == proposal_status)
     proposals = query.order_by(Proposal.created_at.desc()).all()
+    proposal_ids = [p.id for p in proposals]
+    # A status change (approval, resubmission, grading opening, ...) should also
+    # bump a proposal to the top, same as a new comment does.
+    latest_status_changes = dict(
+        db.query(ProposalStatusHistory.proposal_id, func.max(ProposalStatusHistory.created_at))
+        .filter(ProposalStatusHistory.proposal_id.in_(proposal_ids))
+        .group_by(ProposalStatusHistory.proposal_id)
+        .all()
+    ) if proposal_ids else {}
     enriched = []
     for proposal in proposals:
         comments = proposal.comments
@@ -141,7 +151,11 @@ def list_proposals(
             )
             and (read_at is None or _utc_naive(comment.created_at) > read_at)
         )
-        enriched.append((_utc_naive(latest_comment_at or proposal.created_at), proposal, unread, latest_comment_at))
+        latest_status_at = _utc_naive(latest_status_changes.get(proposal.id))
+        activity_at = max(
+            t for t in (_utc_naive(proposal.created_at), latest_comment_at, latest_status_at) if t is not None
+        )
+        enriched.append((activity_at, proposal, unread, latest_comment_at))
     enriched.sort(key=lambda item: item[0], reverse=True)
     return [_to_out(p, latest_comment_at=latest, unread_comment_count=unread) for _, p, unread, latest in enriched]
 
