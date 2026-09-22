@@ -155,6 +155,29 @@ a {
   background: #f3f4f6;
 }
 
+.reminder-dismiss {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.reminder-dismiss:hover,
+.reminder-dismiss:focus-visible {
+  background: var(--red-bg);
+  color: var(--red-text);
+}
+
 .poster-banner {
   display: flex;
   align-items: center;

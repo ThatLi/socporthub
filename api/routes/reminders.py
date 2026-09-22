@@ -13,6 +13,7 @@ from api.models import (
     Proposal,
     Reminder,
     ReminderDirection,
+    ReminderNudge,
     ReminderRecipient,
     ReminderTargetCommittee,
     ReminderTargetType,
@@ -303,6 +304,30 @@ def mark_done(reminder_id: int, db: Session = Depends(get_db), user: User = Depe
     db.commit()
     db.refresh(reminder)
     return _out(reminder, user)
+
+
+@router.delete("/{reminder_id}/mine", status_code=status.HTTP_204_NO_CONTENT)
+def delete_my_recipient(reminder_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    """A recipient removes a completed broadcast from their own inbox. Only their
+    ReminderRecipient row (and its nudge receipts) is deleted — the Reminder and
+    every other recipient's copy are untouched."""
+    recipient = (
+        db.query(ReminderRecipient)
+        .join(Reminder)
+        .filter(
+            ReminderRecipient.reminder_id == reminder_id,
+            ReminderRecipient.user_id == user.id,
+            Reminder.direction == ReminderDirection.to_user,
+        )
+        .first()
+    )
+    if not recipient:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found")
+    if not recipient.is_done:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only reminders marked as done can be removed")
+    db.query(ReminderNudge).filter(ReminderNudge.reminder_recipient_id == recipient.id).delete()
+    db.delete(recipient)
+    db.commit()
 
 
 @router.delete("/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT)

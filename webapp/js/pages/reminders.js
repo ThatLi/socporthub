@@ -72,8 +72,11 @@ function broadcastForm(committees) {
 function inboxCard(reminder, isAdmin) {
   if (reminder.direction === "to_user") {
     // A regular user's inbox: broadcasts sent by an admin, optionally with a deadline.
+    const dismissBtn = reminder.is_done
+      ? `<button class="reminder-dismiss" data-dismiss-reminder="${reminder.id}" title="Remove from inbox" aria-label="Remove from inbox">&times;</button>`
+      : "";
     return `<div class="card ${reminder.is_read ? "reminder-read" : "reminder-unread"}">
-      ${cardHeader(reminder)}
+      ${cardHeader(reminder, dismissBtn)}
       <p style="color:var(--text); white-space:pre-wrap;">${escapeHtml(reminder.message)}</p>
       ${reminder.deadline ? `<p style="font-size:12px; color:var(--text-muted); margin-top:4px;">⏰ Due: ${formatDeadline(reminder.deadline)}</p>` : ""}
       ${
@@ -129,10 +132,13 @@ function outboxCard(reminder, isAdmin) {
   </div>`;
 }
 
-function cardHeader(reminder) {
+function cardHeader(reminder, extra = "") {
   return `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:6px;">
       <span style="font-weight:600; font-size:13px;">${escapeHtml(reminder.sender_name || "")}</span>
-      <span style="font-size:12px; color:var(--text-muted); white-space:nowrap;">${new Date(reminder.created_at).toLocaleString()}</span>
+      <span style="display:flex; align-items:center; gap:6px;">
+        <span style="font-size:12px; color:var(--text-muted); white-space:nowrap;">${new Date(reminder.created_at).toLocaleString()}</span>
+        ${extra}
+      </span>
     </div>`;
 }
 
@@ -178,6 +184,12 @@ function wireUp(root, user) {
   root.querySelectorAll("[data-mark-done]").forEach((button) => {
     button.addEventListener("click", async () => {
       await api.patch(`/api/reminders/${button.dataset.markDone}/done`, {});
+      await renderReminders(root, user);
+    });
+  });
+  root.querySelectorAll("[data-dismiss-reminder]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api.delete(`/api/reminders/${button.dataset.dismissReminder}/mine`);
       await renderReminders(root, user);
     });
   });

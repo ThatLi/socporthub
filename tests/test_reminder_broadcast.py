@@ -89,6 +89,29 @@ def test_recipient_marks_done_and_admin_sees_it(client):
     assert sum(statuses.values()) == 1
 
 
+def test_recipient_can_only_delete_their_own_done_reminder(client):
+    committee_id = _setup(client)
+    reminder_id = client.post(
+        "/api/reminders/broadcast",
+        json={"message": "Cleanup test", "committee_ids": [committee_id]},
+        headers=auth_header(ADMIN),
+    ).json()["id"]
+
+    blocked = client.delete(f"/api/reminders/{reminder_id}/mine", headers=auth_header(USER_A))
+    assert blocked.status_code == 400
+
+    client.patch(f"/api/reminders/{reminder_id}/done", headers=auth_header(USER_A))
+    deleted = client.delete(f"/api/reminders/{reminder_id}/mine", headers=auth_header(USER_A))
+    assert deleted.status_code == 204
+
+    assert client.get("/api/reminders/inbox", headers=auth_header(USER_A)).json() == []
+    inbox_b = client.get("/api/reminders/inbox", headers=auth_header(USER_B)).json()
+    assert len(inbox_b) == 1
+
+    outbox = client.get("/api/reminders/outbox", headers=auth_header(ADMIN)).json()[0]
+    assert len(outbox["recipients"]) == 2
+
+
 def test_admin_cannot_target_a_committee_outside_their_portfolio(client, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "social_admin_telegram_ids", "999")

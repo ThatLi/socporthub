@@ -400,6 +400,7 @@ Reminders [PLANNED — NOT YET BUILT, see §4.3.6]
   POST   /api/reminders/broadcast     — Admin sends a reminder (optional deadline) to one or more CCAs
   GET    /api/reminders/committees    — Committees available to target, grouped by portfolio
   PATCH  /api/reminders/:id/done      — Recipient marks a deadline reminder as done (stops further nudges)
+  DELETE /api/reminders/:id/mine      — Recipient removes their own copy of a done broadcast from their inbox
 
 Email (admin)
   GET    /api/email/preview/:proposal_id — Generate/preview email draft
