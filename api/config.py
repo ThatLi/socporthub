@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     collection_reminder_hour: int = 8
     grading_enabled: bool = False
     grading_remind_admins: bool = True
+    ai_reviewer_enabled: bool = False
+    ai_reviewer_model: str = "gpt-5-mini"
+    ai_reviewer_max_chars: int = 60000
+    ai_reviewer_timeout_seconds: int = 90
+    openai_api_key: str = ""
     # disabled | live
     google_drive_mode: str = "disabled"
     google_service_account_file: str = ""

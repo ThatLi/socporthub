@@ -216,6 +216,10 @@ Block 2, Block 3, Block 4, Block 5, Block 6, Block 7, Block 8, Intl Comm, Soccom
 - User can send a "nudge" to admin for any pending item
 - Free-text message attached to a specific proposal or general
 - Shows in admin dashboard as a notification badge
+- **[PLANNED — NOT YET BUILT]** Users will also get an **Inbox** of reminders admins
+  send *to* them (see §4.3.6). Today the Reminders tab only shows nudges the user has
+  sent ("Sent reminders") — there is no path for an admin to message a user through
+  this system.
 
 ### 4.3 Admin Features
 
@@ -261,6 +265,53 @@ Block 2, Block 3, Block 4, Block 5, Block 6, Block 7, Block 8, Intl Comm, Soccom
 - Admin vets each comment before posting back to the doc
 - **Not in MVP. Requires separate LLM training/prompting work.**
 
+#### 4.3.6 Admin Reminder Broadcast [PLANNED — NOT YET BUILT]
+
+Today `Reminder` (`api/models.py`) and `POST`/`GET /api/reminders`
+(`api/routes/reminders.py`) only support **user → admin** nudges. This section specs
+the reverse direction — admins sending reminders to users — which does not exist yet.
+Don't assume any of the below when working in `api/routes/reminders.py`,
+`api/models.py`, or `webapp/js/pages/reminders.js`; check the current code first.
+
+**Goal:** give admins a compose UI — mirroring the user's existing "Nudge your
+portfolio director" form — that drafts a reminder message and targets it at specific
+CCAs (committees), instead of blasting every user.
+
+- Same compose form shape users have today (message textarea + send), plus a **CCA
+  picker**:
+  - Multi-select list of committees, grouped under two headers in portfolio order —
+    **Social**, then **Welfare** — using `committee_portfolio()` (`api/portfolio.py`)
+    for grouping. An admin only sees/targets CCAs within their own portfolio, same
+    scoping as everywhere else (`admin_committee_filter`).
+  - The picker is a **collapsible**, collapsed by default, so composing a reminder
+    doesn't require scrolling through every committee first.
+  - Selecting a CCA targets every member of that committee (via `UserCommittee`), not
+    a single user — this is a broadcast, not a DM.
+- Sending delivers a Telegram notification to each targeted member (fire-and-forget,
+  per convention) and needs a per-recipient record so the reminder shows up in each
+  member's inbox with its own read state — either one `Reminder` row per recipient or
+  a single row plus a recipient join table; decide at implementation time based on how
+  granular read receipts need to be.
+- Requires a new direction/target concept on the reminder model — the current schema
+  only ever has one implicit direction (user → admin) and one target (a specific
+  admin, implicitly). This needs an Alembic migration; do not hand-edit the schema.
+
+**Reminders tab restructure (both roles), once this ships:**
+
+1. **Inbox** (top, always expanded) — reminders addressed *to* the current user:
+   - Regular user: reminders sent by admins.
+   - Admin: nudges sent by users (today's behavior, including the existing unread
+     badge count).
+2. **Outbox** (below Inbox, collapsible, collapsed by default) — reminders the
+   current user has *sent*:
+   - Regular user: nudges they've sent to admin (today's "Sent reminders" list).
+   - Admin: broadcasts they've sent, including which CCAs each one targeted.
+   - "Outbox" replaces "outgoing reminders" as the section name — shorter, and pairs
+     naturally with "Inbox".
+
+This changes the shared `Reminders` tab (`webapp/js/pages/reminders.js`) for both
+roles — it's not admin-only UI bolted on top of the existing page.
+
 ### 4.4 Shared Features
 
 #### 4.4.1 Navigation
@@ -271,7 +322,8 @@ Three tabs in the WebApp:
 ```
 - Home: Dashboard (user or admin variant based on role)
 - Calendar: Committee calendar view
-- Reminders: Sent (user) or received (admin) reminders
+- Reminders: Sent (user) or received (admin) reminders — see §4.3.6 for the planned
+  Inbox/Outbox redesign covering both directions for both roles
 
 #### 4.4.2 Telegram Bot Commands
 
@@ -317,10 +369,14 @@ Calendar
   GET    /api/calendar                 — Fetch events from shared Google Calendar (filterable by committee colour)
   POST   /api/calendar                 — Add event (colour-coded by committee)
 
-Reminders
+Reminders (current — user → admin only)
   POST   /api/reminders               — Send reminder to admin
   GET    /api/reminders               — List reminders (admin)
   PATCH  /api/reminders/:id/read      — Mark as read
+
+Reminders [PLANNED — NOT YET BUILT, see §4.3.6]
+  POST   /api/reminders/broadcast     — Admin sends a reminder to one or more CCAs
+  GET    /api/reminders/committees    — Committees available to target, grouped by portfolio
 
 Email (admin)
   GET    /api/email/preview/:proposal_id — Generate/preview email draft
@@ -557,6 +613,20 @@ SECRET_KEY=                   # For session/HMAC
 - [ ] LLM integration for proposal review
 - [ ] Comment suggestion UI for admin vetting
 - [ ] Post-approved comments back to Google Doc
+
+### Backlog — Bidirectional Reminders & Inbox [PLANNED, NOT SCHEDULED]
+
+See §4.3.6 for the full spec.
+
+- [ ] Direction/target-user concept on the `Reminder` model (Alembic migration)
+- [ ] Admin compose UI mirroring the existing user nudge form
+- [ ] CCA multi-select target picker, grouped by portfolio (Social, then Welfare),
+      inside a collapsible
+- [ ] Broadcast delivery to all members of each targeted committee (Telegram,
+      fire-and-forget)
+- [ ] Reminders tab redesign for both roles: Inbox (top, expanded) + Outbox
+      (collapsible, renamed from "outgoing reminders")
+- [ ] Per-recipient read state so unread badge counts stay accurate for broadcasts
 
 ---
 

@@ -61,6 +61,11 @@ a proposal's linked Google Doc, send it to an LLM for review, and let the admin 
 suggested comments before they're posted back to the doc. See `SOCIAL-PORT-HUB.md` §11
 and `CLAUDE.md` for the current boundary between "built" and "spec only."
 
+**Also backlogged (not scheduled):** bidirectional reminders. Today reminders only
+flow user → admin; the plan is an admin compose UI that broadcasts to specific CCAs
+(multi-select, grouped Social-then-Welfare, collapsible), a real inbox for users, and
+an Inbox/Outbox redesign of the shared Reminders tab. See `SOCIAL-PORT-HUB.md` §4.3.6.
+
 The calendar deviates from the original spec: instead of the Google Calendar API
 (which requires a GCP billing account), events live in our own database and are
 exposed via a free, open **iCalendar (.ics) feed** that anyone can subscribe to from

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "review_objective": "Review student event proposals for potential safety, conduct, welfare, cultural, privacy, intellectual-property, sponsorship, and documentation concerns. Flag potential concerns for human review; do not make the final institutional approval decision.",
+  "principles": [
+    "Review the entire proposal, including activities, timeline, registration, manpower, food, equipment, venue, publicity, photography, budget, risk assessment, safety plan, crisis plan, medical or evacuation plan, food management plan, appendices, and supporting material.",
+    "Flag ambiguous wording as a potential concern and quote the relevant text.",
+    "Do not invent facts, institutional rules, page numbers, or quotations.",
+    "Distinguish potential risk from a confirmed violation, potential IP issue, or established discrimination.",
+    "Recognise existing mitigations and identify where they are weak, reactive, or insufficiently specific.",
+    "Prefer conservative safety flagging while preserving uncertainty for human review."
+  ],
+  "output_sections": [
+    "Executive summary",
+    "Detailed findings organised by category or activity",
+    "Positive controls observed",
+    "Missing or ambiguous information",
+    "Overall human-review priorities"
+  ],
+  "global_rules": [
+    {"id": "physical-movement", "category": "safety", "severity": "medium", "instruction": "Check running, jumping, climbing, pushing, pulling, throwing, racing, balancing, lifting, carrying, falling, collision, and rapid movement. Check rules, space, supervision, routes, spectator separation, and emergency stopping."},
+    {"id": "physical-contact", "category": "consent", "severity": "high", "instruction": "Flag wrestling, sumo, fighting-style games, pushing, pulling, hand-holding, carrying, forced touching, and close-contact challenges. Check necessity, consent, supervision, and safe alternatives."},
+    {"id": "blindfolding", "category": "safety", "severity": "medium", "instruction": "For blindfold activities, check necessity, opt-out, guidance, physical contact, obstacle removal, supervision, and the participant's ability to stop immediately."},
+    {"id": "restricted-activities", "category": "conduct", "severity": "high", "instruction": "Search for alcohol, smoking, vaping, dangerous substances, weapons, fire, explosives, dangerous stunts, unauthorised access, significant physical danger, or activities encouraging rule-breaking. If the applicable rule is absent, flag for verification rather than declaring a prohibition."},
+    {"id": "food-safety", "category": "food", "severity": "high", "instruction": "Check food preparation, serving, competitions, eating challenges, food games, food throwing, food wastage, hot or raw food, allergens, refrigeration, storage, hygiene, utensils, raw/cooked separation, timing, labelling, serving controls, and cooking equipment."},
+    {"id": "food-play", "category": "food", "severity": "medium", "instruction": "Flag throwing, smearing, fighting with, deliberately wasting, or competitively handling food when unrelated to eating. Check whether the activity creates hygiene, dignity, allergy, or welfare concerns."},
+    {"id": "water-ice", "category": "water-ice", "severity": "medium", "instruction": "Search for water balloons, water bombs, water fights, water games, pools, wet activities, ice throwing, ice games, slippery surfaces, and water containers. Distinguish ordinary food preparation from playing with water or ice. A dry pool or similar item requires clarification."},
+    {"id": "language-content", "category": "conduct", "severity": "medium", "instruction": "Review songs, cheers, chants, scripts, emcee lines, publicity slogans, and speech challenges for vulgar, sexual, abusive, threatening, racial, ethnic, religious, humiliating, or discriminatory content."},
+    {"id": "cultural-sensitivity", "category": "cultural-sensitivity", "severity": "high", "instruction": "Look for ethnic or racial stereotypes, cultural caricatures, mocking accents, religious mockery, inappropriate cultural dress, national-symbol jokes, or roles assigned by race, ethnicity, or religion. Do not infer intent."},
+    {"id": "fair-participation", "category": "inclusion", "severity": "medium", "instruction": "Check participation requirements involving gender, race, nationality, religion, physical ability, medical condition, social group, or block affiliation. Check alternatives, accessibility, fair team formation, and elimination mechanisms."},
+    {"id": "consent-contact", "category": "consent", "severity": "high", "instruction": "Flag mandatory touching, carrying, hugging, restraint, forced proximity, blindfolded interaction, or personal-space intrusion. Check explicit consent, opt-out, alternatives, and organiser intervention."},
+    {"id": "ragging-humiliation", "category": "welfare", "severity": "high", "instruction": "Look for forced embarrassment, hazing, punishment, forced eating or drinking, sexualised movement or jokes, singled-out participants, degradation, and senior-junior power dynamics."},
+    {"id": "tools-equipment", "category": "equipment", "severity": "high", "instruction": "Identify ovens, air fryers, induction cookers, ice shavers, knives, scissors, hardware tools, electrical equipment, carts, inflatables, sporting equipment, and projectiles. Check operator, training, separation, operating area, supervision, failure response, and emergency stopping."},
+    {"id": "confined-space", "category": "safety", "severity": "high", "instruction": "Flag small rooms, enclosed structures, tents, storage areas, dark rooms, escape-room activities, or activities requiring people to remain enclosed. Check capacity, ventilation, exits, supervision, accessibility, and immediate exit."},
+    {"id": "privacy-mixed-gender", "category": "privacy", "severity": "medium", "instruction": "Check forced room sharing, sleeping or changing areas, enclosed rooms, clothing changes, physical contact, and privacy-sensitive situations. Identify the actual privacy or contact risk without assuming mixed genders are inherently problematic."},
+    {"id": "ip-trademark", "category": "intellectual-property", "severity": "medium", "instruction": "Search for company, event, character, movie, game, logo, merchandise, AI-generated derivative, promotional artwork, satire, parody, or third-party branding. Distinguish reference, reproduction, public promotion, and implied endorsement."},
+    {"id": "sponsorship-endorsement", "category": "commercial", "severity": "medium", "instruction": "Check commercial sponsors, logos, social-media instructions, company surveys, commercial talks, product promotion, named partners, and commercial event identity. Flag possible accidental endorsement."},
+    {"id": "photography-consent", "category": "privacy", "severity": "medium", "instruction": "Check photographers, videographers, social posts, publicity videos, photobooths, participant images, consent, optional participation, opt-out, minors, and private or confidential areas."},
+    {"id": "electrical-safety", "category": "safety", "severity": "high", "instruction": "Check socket allocation, extension cords, daisy-chaining, overload, water near electricity, cable trips, equipment placement, and fire risk. Generic instructions to avoid overload may be insufficient for substantial equipment."},
+    {"id": "crowd-management", "category": "crowd-safety", "severity": "medium", "instruction": "For larger events or simultaneous stations, check attendance, venue capacity, queues, station capacity, flow, entrances, exits, evacuation, congestion, spectators, staff ratio, and emergency accountability."},
+    {"id": "outdoor-weather", "category": "safety", "severity": "medium", "instruction": "Check outdoor rain, lightning, haze, heat, wet surfaces, darkness, traffic, and uneven-ground risks. Require stop criteria, relocation, communication, and evacuation arrangements."},
+    {"id": "emergency-medical", "category": "emergency-management", "severity": "high", "instruction": "Check project director, safety officer, first aiders, injury escort, first-aid equipment, AED, contacts, hospital, ambulance, evacuation route, incident reporting, and emergency communication. Do not treat a generic emergency plan as activity-level mitigation."},
+    {"id": "mitigation-quality", "category": "risk-controls", "severity": "medium", "instruction": "Evaluate each mitigation as strong, moderate, or weak. Preventive controls are stronger than supervision, instructions to be careful, or first aid after an incident. Identify the remaining gap."},
+    {"id": "documentation-completeness", "category": "documentation", "severity": "medium", "instruction": "Flag blank fields, TBC, later details, placeholders, generic template instructions, missing floorplans, routes, equipment specifications, manpower, emergency arrangements, and contradictory information."},
+    {"id": "internal-consistency", "category": "documentation", "severity": "medium", "instruction": "Cross-check event date, time, attendance, venue, manpower, programme, budget, equipment, food, risk assessment, safety plan, and publicity. Flag contradictions and risks or equipment present in one section but absent in another."}
+  ]
+}

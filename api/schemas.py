@@ -1,6 +1,6 @@
 from datetime import date, datetime, time
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from api.models import Portfolio, ProposalCategory, ProposalStatus, ReminderTargetType, UserRole, UserStatus
 
@@ -129,6 +129,15 @@ class ProposalOut(BaseModel):
     requested_ccas: list[str] = []
     external_form_data: dict[str, dict] = {}
     grading_available: bool = False
+
+
+class AiReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_title: str
+    proposal_category: str
+    proposal_description: str = ""
+    document_text: str = Field(min_length=1)
 
 
 class ProposalStatusCounts(BaseModel):

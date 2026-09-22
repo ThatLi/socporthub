@@ -35,6 +35,18 @@ Check `api/models.py` and `api/routes/` before referencing anything from Phase 9
 any other phase) as if it already exists — the spec describes the target, not
 necessarily the current code.
 
+There's also a **backlog item — bidirectional reminders** — that is not built and not
+scheduled (comes after Phase 9, if at all). Today `Reminder`
+(`api/models.py`) / `api/routes/reminders.py` / `webapp/js/pages/reminders.js` only
+support **user → admin** nudges. The plan (see `SOCIAL-PORT-HUB.md` §4.3.6) is to let
+admins compose and broadcast reminders to specific CCAs (multi-select, grouped
+Social-then-Welfare via `committee_portfolio()` in `api/portfolio.py`, inside a
+collapsible picker), give users a real inbox for those admin-sent reminders, and
+restructure the shared Reminders tab into an **Inbox** (top, always expanded) plus a
+collapsible **Outbox** (renamed from "outgoing reminders" — shorter, pairs with
+Inbox) for both roles. Don't assume any admin-to-user reminder path, a `direction`
+field on `Reminder`, or an Inbox/Outbox split exists until it's actually in the code.
+
 **Calendar deviates from the spec**: it does not use the Google Calendar API (that
 requires a GCP billing account). Events are stored in our own `calendar_events` table
 and exposed read-only via a public iCalendar feed (`routes/calendar.py:calendar_feed`)
