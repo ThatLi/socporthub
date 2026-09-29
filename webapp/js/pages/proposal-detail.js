@@ -3,6 +3,7 @@ import { renderGrading } from "../components/grading.js?v=grading-3";
 import { statusBadge } from "../components/status-badge.js";
 import { renderDisposableSection } from "../components/disposable-form.js";
 import { collectExternalFormData, loadCommitteeFormFields, renderCommitteeFormsSection } from "../components/committee-forms.js";
+import { renderAiReview } from "../components/ai-review.js";
 
 const NEXT_STATUS = {
   draft: "in_review",
@@ -202,10 +203,32 @@ export function renderNewProposal(root, navigate, user) {
       <div id="form-error"></div>
       <div class="btn-row"><button type="button" class="btn btn-secondary" id="save-draft">Save Draft</button><button type="submit" class="btn">Submit for Review</button></div>
     </form>
+    ${user.role === "admin" ? `<div id="ai-review-slot"></div>` : ""}
   `;
 
   const form = root.querySelector("#proposal-form");
   const category = root.querySelector("#category");
+  if (user.role === "admin") {
+    renderAiReview(root.querySelector("#ai-review-slot"), {
+      title: "Untitled proposal",
+      category: category.value,
+      description: "",
+      event_date: "",
+      event_time: "",
+      committee_name: "",
+      blast_message: "",
+      doc_link: "",
+    }, () => ({
+      title: form.title.value.trim() || "Untitled proposal",
+      category: form.category.value,
+      description: form.description.value.trim(),
+      event_date: form.event_date.value,
+      event_time: form.event_time.value,
+      committee_name: "",
+      blast_message: form.blast_message.value.trim(),
+      doc_link: form.doc_link.value.trim(),
+    }));
+  }
   category.addEventListener("change", () => applyCategoryRequirements(root, category.value));
   applyCategoryRequirements(root, category.value);
   loadCommitteeFormFields(root).catch((error) => {
@@ -331,6 +354,7 @@ export async function renderProposalDetail(root, user, proposalId, navigate) {
 
     <h1>${escapeHtml(proposal.title)}</h1>
     <p>${escapeHtml(proposal.committee_name)} · Submitted by ${escapeHtml(proposal.submitter_name || "")}</p>
+    ${isAdmin ? `<div id="ai-review-slot"></div>` : ""}
     <div id="grading-slot"></div>
 
     ${canEdit ? `<div id="edit-form-slot"></div>` : ""}
@@ -402,6 +426,7 @@ export async function renderProposalDetail(root, user, proposalId, navigate) {
   renderCommitteeFormsSection(root.querySelector("#committee-forms-slot"), proposal);
   renderDisposableSection(root.querySelector("#disposable-slot"), user, proposal);
   renderCommentsSection(root.querySelector("#comments-slot"), user, proposal);
+  if (isAdmin) renderAiReview(root.querySelector("#ai-review-slot"), proposal);
   await renderGrading(root.querySelector("#grading-slot"), user, proposal,
     () => renderProposalDetail(root, user, proposalId, navigate));
   if (proposal.status === "in_review" && usesEmailWorkflow) renderEmailSection(root, user, proposal, navigate);

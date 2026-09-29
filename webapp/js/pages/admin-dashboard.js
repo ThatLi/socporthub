@@ -84,12 +84,15 @@ async function renderDisposablesSection(content) {
             <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-top:1px solid var(--border);">
               <div>
                 <div style="font-size:13px; font-weight:600;">${escapeHtml(r.proposal_title)}</div>
-                <div style="font-size:12px; color:var(--text-muted)">${escapeHtml(r.committee_name)} · ${escapeHtml(r.requester_name || "")}</div>
+                <div style="font-size:12px; color:var(--text-muted)">${escapeHtml(r.committee_name)} · ${escapeHtml(r.requester_name || "")}${r.requester_cca ? ` · ${escapeHtml(r.requester_cca)}` : ""}</div>
+                ${r.description ? `<div style="font-size:12px; margin-top:4px;">${escapeHtml(r.description)}</div>` : ""}
               </div>
               ${
                 r.approved
                   ? `<span class="badge badge-approved">Approved</span>`
-                  : `<button class="btn" style="width:auto; padding:6px 14px;" data-approve-disposable="${r.id}">Approve</button>`
+                  : r.rejected
+                    ? `<span class="badge">Rejected</span>`
+                    : `<span><button class="btn" style="width:auto; padding:6px 14px;" data-approve-disposable="${r.id}">Approve</button> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-reject-disposable="${r.id}">Reject</button></span>`
               }
             </div>`
             )
@@ -103,6 +106,13 @@ async function renderDisposablesSection(content) {
     btn.addEventListener("click", async () => {
       btn.disabled = true;
       await api.patch(`/api/disposables/${btn.dataset.approveDisposable}`, { approved: true });
+      renderDisposablesSection(content);
+    });
+  });
+  content.querySelectorAll("[data-reject-disposable]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      await api.patch(`/api/disposables/${btn.dataset.rejectDisposable}`, { approved: false });
       renderDisposablesSection(content);
     });
   });

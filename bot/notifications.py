@@ -91,9 +91,24 @@ async def notify_user_new_comment(
 
 
 async def notify_admins_new_disposable_request(
-    proposal_title: str, requester_name: str, portfolio: Portfolio
+    proposal_title: str, requester_name: str, portfolio: Portfolio,
+    *, telegram_username: str | None = None, cca: str | None = None,
+    quantities: dict[str, int] | None = None, collection_date: str | None = None,
+    collection_time: str | None = None, description: str | None = None,
 ) -> None:
-    text = f"\U0001f37d New disposables request for <b>{proposal_title}</b> from {requester_name}"
+    if quantities is None:
+        text = f"\U0001f37d New disposables request for <b>{escape(proposal_title)}</b> from {escape(requester_name)}"
+    else:
+        breakdown = ", ".join(f"{amount} {item}" for item, amount in quantities.items() if amount) or "none"
+        text = (
+            "🍽 <b>New disposable request</b>\n\n"
+            f"Name: {escape(requester_name)}\n"
+            f"Telegram: {escape(telegram_username or 'unknown')}\n"
+            f"CCA: {escape(cca or 'unknown')}\n"
+            f"Amount: {escape(breakdown)}\n"
+            f"Collection: {escape(collection_date or '—')} {escape(collection_time or '')}\n"
+            f"Description: {escape(description or '—')}"
+        )
     for admin_id in _admin_ids(portfolio):
         await send_message(admin_id, text)
 
@@ -103,6 +118,10 @@ async def notify_user_disposable_approved(telegram_id: int, proposal_title: str,
         telegram_id,
         f"✅ Disposables approved for <b>{proposal_title}</b> — collect on {collection_date}.",
     )
+
+
+async def notify_user_disposable_rejected(telegram_id: int, request_label: str) -> None:
+    await send_message(telegram_id, f"❌ Your disposable request for <b>{escape(request_label)}</b> was rejected.")
 
 
 async def notify_user_email_sent(telegram_id: int, proposal_title: str) -> None:

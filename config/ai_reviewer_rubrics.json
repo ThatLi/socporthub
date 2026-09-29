@@ -11,8 +11,7 @@
   ],
   "output_sections": [
     "Executive summary",
-    "Detailed findings organised by category or activity",
-    "Positive controls observed",
+    "One-line key findings per category or activity",
     "Missing or ambiguous information",
     "Overall human-review priorities"
   ],

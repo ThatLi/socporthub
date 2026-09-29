@@ -63,8 +63,11 @@ and `CLAUDE.md` for the current boundary between "built" and "spec only."
 
 **Also backlogged (not scheduled):** bidirectional reminders. Today reminders only
 flow user → admin; the plan is an admin compose UI that broadcasts to specific CCAs
-(multi-select, grouped Social-then-Welfare, collapsible), a real inbox for users, and
-an Inbox/Outbox redesign of the shared Reminders tab. See `SOCIAL-PORT-HUB.md` §4.3.6.
+(multi-select, grouped Social-then-Welfare, collapsible), a real inbox for users, an
+Inbox/Outbox redesign of the shared Reminders tab, and an optional per-reminder
+deadline with a "mark as done" action plus scheduled Telegram nudges at send-time,
+3-days-left, and 1-day-left (reusing the grading reminder scheduler's
+delivery-receipt pattern). See `SOCIAL-PORT-HUB.md` §4.3.6.
 
 The calendar deviates from the original spec: instead of the Google Calendar API
 (which requires a GCP billing account), events live in our own database and are
@@ -89,6 +92,10 @@ uvicorn api.main:app --reload
 Email sending requires `RESEND_API_KEY` and `RESEND_FROM_EMAIL` (a verified Resend
 sender). Without them, drafts and reminder features still work, but sending an email
 returns a clear configuration error.
+
+The optional AI proposal reviewer uses Gemini's `generateContent` API with a structured
+JSON response. Set `AI_REVIEWER_ENABLED=true`, `GEMINI_API_KEY`, and optionally
+`AI_REVIEWER_MODEL` in `.env`; keep the key server-side and never expose it to the browser.
 
 The webapp is served at `/` from static files in `webapp/`; the API lives under `/api`.
 Health check: `GET /api/health`.

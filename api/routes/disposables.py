@@ -8,18 +8,24 @@ from api.database import get_db
 from api.models import DisposableRequest, Proposal, User, UserRole
 from api.portfolio import admin_committee_filter, committee_portfolio
 from api.schemas import DisposableRequestOut, DisposableRequestUpdate, DisposableRequestUpsert
-from bot.notifications import notify_admins_new_disposable_request, notify_user_disposable_approved
+from bot.notifications import (
+    notify_admins_new_disposable_request,
+    notify_user_disposable_approved,
+    notify_user_disposable_rejected,
+)
 from api.routes.proposals import get_visible_proposal
 
 router = APIRouter(prefix="/api/disposables", tags=["disposables"])
 
 
 def _to_out(d: DisposableRequest) -> DisposableRequestOut:
+    proposal_title = d.proposal.title if d.proposal else "Standalone Telegram request"
+    committee_name = d.proposal.committee.name if d.proposal else (d.requester_cca or "—")
     return DisposableRequestOut(
         id=d.id,
         proposal_id=d.proposal_id,
-        proposal_title=d.proposal.title,
-        committee_name=d.proposal.committee.name,
+        proposal_title=proposal_title,
+        committee_name=committee_name,
         requested_by=d.requested_by,
         requester_name=d.requester.display_name,
         plates=d.plates,
@@ -30,6 +36,9 @@ def _to_out(d: DisposableRequest) -> DisposableRequestOut:
         collection_date=d.collection_date,
         collection_time=d.collection_time.isoformat() if d.collection_time else None,
         approved=d.approved,
+        rejected=d.rejected,
+        requester_cca=d.requester_cca,
+        description=d.description,
         created_at=d.created_at,
     )
 
@@ -47,7 +56,10 @@ def list_disposables(
     elif user.role != UserRole.admin:
         query = query.filter(DisposableRequest.requested_by == user.id)
     else:
-        query = query.join(DisposableRequest.proposal).join(Proposal.committee).filter(admin_committee_filter(user))
+        query = query.outerjoin(DisposableRequest.proposal).outerjoin(Proposal.committee)
+        # Standalone requests are deliberately visible to admins for vetting;
+        # proposal-backed requests retain the existing portfolio restriction.
+        query = query.filter((DisposableRequest.proposal_id.is_(None)) | admin_committee_filter(user))
     requests = query.order_by(DisposableRequest.collection_date).all()
     return [_to_out(d) for d in requests]
 
@@ -61,9 +73,9 @@ def todays_collections(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin access required")
     requests = (
         db.query(DisposableRequest)
-        .join(DisposableRequest.proposal).join(Proposal.committee)
+        .outerjoin(DisposableRequest.proposal).outerjoin(Proposal.committee)
         .filter(DisposableRequest.approved.is_(True), DisposableRequest.collection_date == date.today())
-        .filter(admin_committee_filter(admin))
+        .filter((DisposableRequest.proposal_id.is_(None)) | admin_committee_filter(admin))
         .all()
     )
     return [_to_out(d) for d in requests]
@@ -92,6 +104,8 @@ async def upsert_disposable(
     disposable.forks = req.forks
     disposable.spoons = req.spoons
     disposable.collection_date = req.collection_date
+    disposable.description = req.description
+    disposable.rejected = False
     try:
         disposable.collection_time = time.fromisoformat(req.collection_time) if req.collection_time else None
     except ValueError as exc:
@@ -105,7 +119,7 @@ async def upsert_disposable(
 
     if is_new:
         await notify_admins_new_disposable_request(
-            proposal.title, user.display_name or user.email, committee_portfolio(proposal.committee)
+            proposal.title, user.display_name or user.email, committee_portfolio(proposal.committee),
         )
 
     return _to_out(disposable)
@@ -126,12 +140,16 @@ async def update_disposable(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Disposable request not found")
 
     disposable.approved = req.approved
+    disposable.rejected = not req.approved
     db.commit()
     db.refresh(disposable)
 
+    request_label = disposable.proposal.title if disposable.proposal else "your Telegram request"
     if req.approved:
         await notify_user_disposable_approved(
-            disposable.requester.telegram_id, disposable.proposal.title, disposable.collection_date.isoformat()
+            disposable.requester.telegram_id, request_label, disposable.collection_date.isoformat()
         )
+    else:
+        await notify_user_disposable_rejected(disposable.requester.telegram_id, request_label)
 
     return _to_out(disposable)

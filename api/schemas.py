@@ -194,6 +194,7 @@ class DisposableRequestUpsert(BaseModel):
     spoons: int = 0
     collection_date: date
     collection_time: str | None = None
+    description: str | None = None
 
 
 class DisposableRequestUpdate(BaseModel):
@@ -204,7 +205,7 @@ class DisposableRequestOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    proposal_id: int
+    proposal_id: int | None
     proposal_title: str
     committee_name: str
     requested_by: int
@@ -217,6 +218,9 @@ class DisposableRequestOut(BaseModel):
     collection_date: date
     collection_time: str | None
     approved: bool
+    rejected: bool = False
+    requester_cca: str | None = None
+    description: str | None = None
     created_at: datetime
 
 

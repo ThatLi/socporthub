@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from api.auth import get_current_admin
 from api.config import get_settings
 from api.schemas import AiReviewRequest
-from api.services.ai_reviewer import OpenAIReviewer, ReviewResult, load_rubrics
+from api.services.ai_reviewer import GeminiReviewer, ReviewResult, load_rubrics
 
 router = APIRouter(prefix="/api/ai-review", tags=["ai-review"])
 
@@ -16,8 +16,8 @@ async def review_document(req: AiReviewRequest, _admin=Depends(get_current_admin
     if len(req.document_text) > settings.ai_reviewer_max_chars:
         raise HTTPException(413, "The document is too long to review")
     try:
-        reviewer = OpenAIReviewer(
-            settings.openai_api_key,
+        reviewer = GeminiReviewer(
+            settings.gemini_api_key,
             model=settings.ai_reviewer_model,
             timeout=settings.ai_reviewer_timeout_seconds,
         )

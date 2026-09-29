@@ -1,7 +1,7 @@
 """Rubric-driven AI reviewer.
 
-The local stub is retained for offline tests. OpenAIReviewer is an HTTP adapter
-for the Responses API and returns the same validated result contract.
+The local stub is retained for offline tests. GeminiReviewer is an HTTP adapter
+for Gemini's generateContent API and returns the same validated result contract.
 """
 
 import json
@@ -126,77 +126,76 @@ class LocalStubReviewer:
 
 def _structured_output_schema() -> dict:
     suggestion = {
-        "type": "object",
-        "additionalProperties": False,
+        "type": "OBJECT",
         "properties": {
-            "rule_id": {"type": "string"},
-            "category": {"type": "string"},
-            "severity": {"type": "string", "enum": ["low", "medium", "high"]},
-            "page": {"type": "string"},
-            "evidence": {"type": "string"},
-            "concern": {"type": "string"},
-            "existing_mitigation": {"type": "string"},
-            "gap": {"type": "string"},
-            "recommended_clarification": {"type": "string"},
-            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-            "status": {"type": "string", "enum": ["pending"]}
+            "rule_id": {"type": "STRING"},
+            "category": {"type": "STRING"},
+            "severity": {"type": "STRING", "enum": ["low", "medium", "high"]},
+            "page": {"type": "STRING"},
+            "evidence": {"type": "STRING"},
+            "concern": {"type": "STRING"},
+            "existing_mitigation": {"type": "STRING"},
+            "gap": {"type": "STRING"},
+            "recommended_clarification": {"type": "STRING"},
+            "confidence": {"type": "NUMBER"},
+            "status": {"type": "STRING", "enum": ["pending"]}
         },
         "required": ["rule_id", "category", "severity", "page", "evidence", "concern", "existing_mitigation", "gap", "recommended_clarification", "confidence", "status"]
     }
     return {
-        "type": "object",
-        "additionalProperties": False,
+        "type": "OBJECT",
         "properties": {
-            "summary": {"type": "string"},
-            "suggestions": {"type": "array", "items": suggestion}
+            "summary": {"type": "STRING"},
+            "suggestions": {"type": "ARRAY", "items": suggestion}
         },
         "required": ["summary", "suggestions"]
     }
 
 
-class OpenAIReviewer:
-    def __init__(self, api_key: str, model: str = "gpt-5-mini", timeout: float = 90) -> None:
+class GeminiReviewer:
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash", timeout: float = 90) -> None:
         if not api_key:
-            raise ValueError("OPENAI_API_KEY is not configured")
+            raise ValueError("GEMINI_API_KEY is not configured")
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
 
     async def review(self, request: ReviewRequest, rubrics: ReviewerRubrics) -> ReviewResult:
+        schema = _structured_output_schema()
         payload = {
-            "model": self.model,
-            "store": False,
-            "input": [
-                {"role": "system", "content": [{"type": "input_text", "text": "You are a careful proposal safety reviewer."}]},
-                {"role": "user", "content": [{"type": "input_text", "text": build_review_prompt(request, rubrics)}]}
-            ],
-            "text": {"format": {"type": "json_schema", "name": "proposal_review", "strict": True, "schema": _structured_output_schema()}}
+            "systemInstruction": {"parts": [{"text": "You are a careful proposal safety reviewer."}]},
+            "contents": [{"role": "user", "parts": [{"text": build_review_prompt(request, rubrics)}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": schema,
+                "temperature": 0.1,
+            },
         }
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
-                    "https://api.openai.com/v1/responses",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
+                    headers={"x-goog-api-key": self.api_key},
                     json=payload,
                 )
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise RuntimeError(f"OpenAI review request failed ({exc.response.status_code}): {exc.response.text[:500]}") from exc
+            raise RuntimeError(f"Gemini review request failed ({exc.response.status_code}): {exc.response.text[:500]}") from exc
         except httpx.HTTPError as exc:
-            raise RuntimeError(f"OpenAI review request could not be completed: {exc}") from exc
+            raise RuntimeError(f"Gemini review request could not be completed: {exc}") from exc
 
         data = response.json()
-        if data.get("status") not in (None, "completed"):
-            raise RuntimeError(f"OpenAI review did not complete: {data.get('status', 'unknown status')}")
-        output_text = data.get("output_text") or "".join(
-            item.get("text", "")
-            for message in data.get("output", [])
-            for item in message.get("content", [])
-            if item.get("type") == "output_text"
+        output_text = "".join(
+            part.get("text", "")
+            for candidate in data.get("candidates", [])
+            for part in candidate.get("content", {}).get("parts", [])
+            if part.get("text")
         )
         if not output_text:
-            raise RuntimeError("OpenAI review returned no structured output")
+            block_reason = data.get("promptFeedback", {}).get("blockReason")
+            detail = f" (blocked: {block_reason})" if block_reason else ""
+            raise RuntimeError(f"Gemini review returned no structured output{detail}")
         try:
             return ReviewResult.model_validate(json.loads(output_text))
         except (json.JSONDecodeError, ValueError) as exc:
-            raise RuntimeError("OpenAI review returned invalid structured output") from exc
+            raise RuntimeError("Gemini review returned invalid structured output") from exc

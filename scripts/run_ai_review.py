@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from api.config import get_settings
-from api.services.ai_reviewer import LocalStubReviewer, OpenAIReviewer, ReviewRequest, load_rubrics
+from api.services.ai_reviewer import GeminiReviewer, LocalStubReviewer, ReviewRequest, load_rubrics
 
 
 def main() -> None:
@@ -23,7 +23,7 @@ def main() -> None:
     parser.add_argument("--title", required=True)
     parser.add_argument("--document", required=True, type=Path)
     parser.add_argument("--rubrics", default="config/ai_reviewer_rubrics.json", type=Path)
-    parser.add_argument("--provider", choices=("local", "openai"), default="local")
+    parser.add_argument("--provider", choices=("local", "gemini"), default="local")
     args = parser.parse_args()
     request = ReviewRequest(
         proposal_title=args.title,
@@ -31,11 +31,11 @@ def main() -> None:
         document_text=args.document.read_text(encoding="utf-8"),
     )
     rubrics = load_rubrics(args.rubrics)
-    if args.provider == "openai":
+    if args.provider == "gemini":
         import asyncio
         settings = get_settings()
-        result = asyncio.run(OpenAIReviewer(
-            settings.openai_api_key,
+        result = asyncio.run(GeminiReviewer(
+            settings.gemini_api_key,
             model=settings.ai_reviewer_model,
             timeout=settings.ai_reviewer_timeout_seconds,
         ).review(request, rubrics))

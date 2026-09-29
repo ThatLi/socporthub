@@ -246,7 +246,8 @@ class DisposableRequest(Base):
     __tablename__ = "disposable_requests"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    proposal_id: Mapped[int] = mapped_column(ForeignKey("proposals.id"), unique=True, nullable=False)
+    # Telegram users can request disposables without creating a synthetic proposal.
+    proposal_id: Mapped[int | None] = mapped_column(ForeignKey("proposals.id"), unique=True, nullable=True)
     requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     plates: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     cups: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -256,6 +257,9 @@ class DisposableRequest(Base):
     collection_date: Mapped[date] = mapped_column(Date, nullable=False)
     collection_time: Mapped[time | None] = mapped_column(Time)
     approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    rejected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    requester_cca: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     proposal: Mapped["Proposal"] = relationship(back_populates="disposable_request")
