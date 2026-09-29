@@ -570,7 +570,6 @@ TELEGRAM_WEBAPP_URL=          # Public URL of the webapp
 DATABASE_URL=                 # Railway provides this
 
 # Google
-GOOGLE_SERVICE_ACCOUNT_JSON=  # Base64-encoded service account key
 GOOGLE_CALENDAR_ID=           # Single shared calendar ID
 
 # Resend

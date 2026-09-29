@@ -24,7 +24,7 @@ Full product spec: [`SOCIAL-PORT-HUB.md`](./SOCIAL-PORT-HUB.md).
   (`api/portfolio.py`) instead of scattered `if` checks.
 - **Post-event grading workflow** — category-specific rubrics, a 14-day
   self-assessment window, scheduled Telegram reminders with delivery receipts, and
-  optional Google Drive evidence folders — all behind feature flags, off by default.
+  optional Google Drive folders for user-uploaded proof images.
 - **Config-driven form linking** — new external (CCA) forms are added via one JSON
   config entry (`GOOGLE_FORM_CONFIGS`), not a migration.
 - **Own calendar, no GCP bill** — events live in Postgres and are exposed as a public,
@@ -44,7 +44,7 @@ Full product spec: [`SOCIAL-PORT-HUB.md`](./SOCIAL-PORT-HUB.md).
 | Bot | Raw Telegram Bot API over `httpx` | No bot framework; webhook runs inside the same FastAPI process |
 | Frontend | Vanilla JS SPA | No build step, served as static files by FastAPI |
 | Email | Resend | Admin-editable draft → send, auto-advances proposal status |
-| Docs/Drive | Google Docs & Drive APIs (service account) | PDF export for email attachments; evidence folders for grading |
+| Docs/Drive | Google Docs export and Drive folders | PDF export for email attachments; user-uploaded grading evidence |
 | Hosting | Railway | One process (`Procfile` runs migrations, then `uvicorn`) |
 
 ## Status
@@ -54,7 +54,7 @@ lifecycle (comments with replies, status history, category-specific requirements
 poster/PDF/blast-message uploads), an in-app calendar with a public iCalendar feed,
 hall disposables requests/approval, admin email drafts/sending via Resend, reminders,
 Social/Welfare portfolio separation, config-driven external CCA form linking, and a
-post-event grading workflow with Google Drive evidence folders.
+post-event grading workflow with Google Drive proof-image folders.
 
 **Phase 9 — AI Proposal Reviewer — is next and final** (deferred, not yet built): read
 a proposal's linked Google Doc, send it to an LLM for review, and let the admin vet

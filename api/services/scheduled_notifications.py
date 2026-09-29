@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 from api.config import get_settings
 from api.database import SessionLocal
 from api.models import DisposableRequest, Portfolio
-from api.models import Proposal, ProposalStatus
 from api.portfolio import committee_portfolio
 from bot.notifications import notify_admins_todays_collections
 

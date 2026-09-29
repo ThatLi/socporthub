@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from api.config import get_settings
 from api.models import Portfolio, Proposal
 from api.portfolio import committee_portfolio
-from api.services.google_docs import download_google_doc_pdf, proposal_pdf_filename
 
 logger = logging.getLogger(__name__)
 BASE = "https://www.googleapis.com/drive/v3"
@@ -34,24 +33,6 @@ def _access_token():
         credentials = service_account.Credentials.from_service_account_file(settings.google_service_account_file, **options)
     credentials.refresh(Request())
     return credentials.token
-
-
-async def _upload_pdf(client: httpx.AsyncClient, metadata: dict, pdf: bytes) -> dict:
-    """Upload a PDF with Drive's multipart endpoint and return its metadata."""
-    boundary = "rh_proposal_pdf_boundary"
-    data = (
-        f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
-        f"{json.dumps(metadata)}\r\n"
-        f"--{boundary}\r\nContent-Type: application/pdf\r\n\r\n"
-    ).encode() + pdf + f"\r\n--{boundary}--\r\n".encode()
-    response = await client.post(
-        "https://www.googleapis.com/upload/drive/v3/files",
-        params={"uploadType": "multipart", "supportsAllDrives": "true"},
-        headers={"Content-Type": f"multipart/related; boundary={boundary}"},
-        content=data,
-    )
-    response.raise_for_status()
-    return response.json()
 
 
 async def provision_evidence(db: Session, proposal_id: int):
@@ -89,47 +70,14 @@ async def provision_evidence(db: Session, proposal_id: int):
             if not proposal.drive_ready:
                 proposal.drive_ready = True
                 db.commit()
-            # Do not grant access based on the app registration email. Some
-            # registered addresses are not Google accounts, and Drive rejects
-            # those invitations. Users can open the folder link and choose the
-            # Google account that has access to the Shared Drive themselves.
-            if proposal.doc_link and proposal.drive_pdf_id:
-                response = await client.get(f"{BASE}/files/{proposal.drive_pdf_id}", params={"supportsAllDrives": "true", "fields": "id"})
-                if response.status_code == 404:
-                    _, pdf = await download_google_doc_pdf(proposal.doc_link)
-                    metadata = {"id": proposal.drive_pdf_id, "name": proposal_pdf_filename(proposal.title, proposal.committee.name), "parents": [proposal.drive_folder_id]}
-                    try:
-                        await _upload_pdf(client, metadata, pdf)
-                    except httpx.HTTPStatusError as exc:
-                        if exc.response.status_code != 409:
-                            raise
-                else:
-                    response.raise_for_status()
-            elif proposal.doc_link:
-                # Search by proposal_id before uploading so a retry after a lost
-                # upload response does not create a second PDF.
-                response = await client.get(f"{BASE}/files", params={
-                    "q": f"'{proposal.drive_folder_id}' in parents and trashed = false and appProperties has {{ key = 'proposal_id' and value = '{proposal.id}' }}",
-                    "spaces": "drive", "includeItemsFromAllDrives": "true", "supportsAllDrives": "true",
-                    "fields": "files(id,name,mimeType)",
-                })
-                response.raise_for_status()
-                pdf_file = next((item for item in response.json().get("files", []) if item.get("mimeType") == "application/pdf"), None)
-                if pdf_file:
-                    proposal.drive_pdf_id = pdf_file["id"]
-                else:
-                    _, pdf = await download_google_doc_pdf(proposal.doc_link)
-                    metadata = {"name": proposal_pdf_filename(proposal.title, proposal.committee.name), "parents": [proposal.drive_folder_id], "appProperties": {"proposal_id": str(proposal.id)}}
-                    proposal.drive_pdf_id = (await _upload_pdf(client, metadata, pdf))["id"]
-                db.commit()
         proposal.drive_error = None
         db.commit()
     except Exception as exc:
         db.rollback()
-        # Don't expose credentials/provider responses to users. Keep the folder
-        # usable if only PDF export or sharing failed, and retry in the scheduler.
+        # Don't expose credentials/provider responses to users. Folder setup is
+        # retried by the scheduler when the provider is temporarily unavailable.
         proposal = db.get(Proposal, proposal_id)
-        proposal.drive_error = "Evidence setup is incomplete. Folder access or PDF copying will be retried."
+        proposal.drive_error = "Evidence folder setup is incomplete and will be retried."
         db.commit()
         detail = str(exc).replace("\n", " ")
         if isinstance(exc, httpx.HTTPStatusError):

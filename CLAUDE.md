@@ -13,8 +13,9 @@ message/doc-link uploads per `ProposalCategory`), Social/Welfare **portfolio**
 separation (scoped admins, committees, and notifications — see `api/portfolio.py`),
 config-driven external CCA form linking (`GOOGLE_FORM_CONFIGS`, no migration needed to
 add a form), and **proposal grading** — a post-event rubric self-assessment with a
-14-day deadline, Telegram reminders, and optional Google Drive evidence folders
+14-day deadline, Telegram reminders, and optional Google Drive proof-image folders
 (`docs/grading.md`, `api/services/grading.py`, `api/services/google_drive.py`).
+The app creates/reuses folders but does not upload proposal PDFs.
 
 **Phase 9 — AI Proposal Reviewer — is the final phase and is not yet built.** Per the
 spec (`SOCIAL-PORT-HUB.md` §4.3.5 / §11), it will read a proposal's linked Google Doc,
@@ -24,7 +25,7 @@ gives read access to linked docs (currently used only for PDF export on submissi
 `google-auth` is already a dependency, but there is no LLM/Anthropic client anywhere in
 `requirements.txt` and no review route yet — don't assume either exists. When it's
 built, follow the same feature-flag pattern as grading/Drive (`GRADING_ENABLED`,
-`GOOGLE_DRIVE_MODE`): default off, admin vets before anything is posted back, and
+`GRADING_ENABLED`): default off, admin vets before anything is posted back, and
 Telegram notifications around it stay fire-and-forget per the convention below.
 
 The calendar is database-backed with a public iCalendar feed; do not reintroduce
@@ -82,8 +83,8 @@ Don't reintroduce a Google Calendar dependency without checking this decision fi
 - Status transitions (`draft → in_review → submitted → finished → grading → final`) are
   validated server-side against `PROPOSAL_STATUS_TRANSITIONS` in `api/models.py`; don't
   trust a status value posted from the client.
-- Optional integrations (grading, Google Drive) are off by default and gated by a
-  settings flag (`GRADING_ENABLED`, `GOOGLE_DRIVE_MODE=live`) read via
+- Optional integrations (grading and Drive folders) are off by default and gated by
+  settings flags (`GRADING_ENABLED`, `GOOGLE_DRIVE_MODE=live`) read via
   `api/config.py:get_settings()` — follow this pattern for any new external
   integration (including the eventual AI reviewer) rather than assuming credentials
   are present.

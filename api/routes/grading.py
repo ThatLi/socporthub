@@ -87,7 +87,6 @@ async def start_grading(proposal_id: int, db: Session = Depends(get_db), user: U
     db.refresh(proposal)
     return grading_out(db, proposal, user)
 
-
 @router.put("/{proposal_id}/grading", dependencies=[Depends(enabled)])
 async def save_grading(proposal_id: int, req: AssessmentRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     proposal = get_visible_proposal(db, user, proposal_id)

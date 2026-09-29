@@ -22,7 +22,7 @@
 - Merch has no grading rubric. Pubs is a Social category; Welfare committees
   continue to use Event and Initiative.
 
-## Enable grading and Drive
+## Enable grading and Drive folders
 
 Apply migration `0021` using `alembic upgrade head`, then configure:
 
@@ -35,30 +35,9 @@ GOOGLE_DRIVE_SOCIAL_PARENT_FOLDER_ID=your-social-folder-id
 GOOGLE_DRIVE_WELFARE_PARENT_FOLDER_ID=your-welfare-folder-id
 ```
 
-Use a real Workspace shared drive. A `GOOGLE_SERVICE_ACCOUNT_JSON` hosting secret
-can replace the credential file. `GOOGLE_DRIVE_PARENT_FOLDER_ID` is the fallback
-if portfolio-specific parent IDs are absent. Keep credentials out of Git.
-
-Give the service account permission to create folders/files and grant the
-submitter writer access to its subfolder. Sharing policies must permit the
-submitter's registered email, which must be usable as a Google account. Admin
-access is inherited from the chosen parent; use separate portfolio parents to
-keep that access scoped. The integration never enables public sharing.
-
-Folders are created on first submission for review, named
-`[committee-name]-[proposal-title]`, and reused for grading. Drafts do not create
-folders. The scheduler also picks up existing submitted proposals. The app checks
-the parent for an existing folder tagged with the proposal ID before creating one,
-so a retry after an uncertain response can reconcile a folder instead of duplicating
-it. Accessible supporting
-Google Docs are copied as PDFs; this is a snapshot at the first successful copy.
-Folder, sharing or PDF errors do not prevent grading. Setup retries every
-10 minutes, with a manual retry in the grading form.
-
-The integration uses `drive.file` and `supportsAllDrives=true`.
-See [Google folder creation](https://developers.google.com/workspace/drive/api/guides/folder),
-[shared-drive support](https://developers.google.com/workspace/drive/api/guides/enable-shareddrives),
-and [uploads](https://developers.google.com/workspace/drive/api/guides/manage-uploads).
+Drive is used only to create/reuse proposal evidence folders. Users and admins can
+open the folder from the grading screen and upload proof images themselves. The
+application does not export or upload proposal PDFs to Drive.
 
 ## Reminders
 
