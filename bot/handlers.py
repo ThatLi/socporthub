@@ -20,6 +20,9 @@ HELP_TEXT = (
     "/start — Open the app\n"
     "/register — Register your name, Telegram handle and CCA\n"
     "/disposable — Request disposable items without opening the app\n"
+    "/pending — Admins: show pending requests\n"
+    "/approve <id> — Admins: approve a disposable request\n"
+    "/reject <id> — Admins: reject a disposable request\n"
     "/status — Show your proposal status\n"
     "/remind <message> — Nudge the admin\n"
     "/help — Show this message\n\n"
@@ -29,6 +32,7 @@ HELP_TEXT = (
 
 _conversation: dict[int, dict] = {}
 _ITEMS = ("plates", "cups", "bowls", "forks", "spoons")
+_ITEM_LABELS = {"plates": "🍽 Plates", "cups": "🥤 Cups", "bowls": "🥣 Bowls", "forks": "🍴 Forks", "spoons": "🥄 Spoons"}
 _HANDLE_RE = re.compile(r"^@?[A-Za-z0-9_]{5,32}$")
 
 
@@ -100,8 +104,8 @@ async def _handle_disposable_start(chat_id: int) -> None:
         if user.status != UserStatus.approved:
             await send_message(chat_id, f"Your registration is {user.status.value}. You can request disposables once an admin approves it.")
             return
-    _conversation[chat_id] = {"flow": "disposable", "step": "quantities"}
-    await send_message(chat_id, "Send quantities in this order: plates, cups, bowls, forks, spoons. Example: 20 30 0 25 25")
+    _conversation[chat_id] = {"flow": "disposable", "step": "title"}
+    await send_message(chat_id, "What is the name of this request?\nFor example: Block 4 movie night or Welfare pack distribution.")
 
 
 async def _handle_conversation(chat_id: int, text: str) -> None:
@@ -158,16 +162,30 @@ async def _handle_registration_step(chat_id: int, state: dict, text: str) -> Non
 
 async def _handle_disposable_step(chat_id: int, state: dict, text: str) -> None:
     step = state["step"]
-    if step == "quantities":
+    if step == "title":
+        if not 1 <= len(text) <= 255:
+            await send_message(chat_id, "Please send a request name between 1 and 255 characters.")
+            return
+        state.update(title=text, quantities={}, step="quantity_plates")
+        await send_message(chat_id, "How many plates are needed?\nSend a whole number, or 0 if none.")
+    elif step.startswith("quantity_"):
+        item = step.removeprefix("quantity_")
         try:
-            values = [int(part) for part in text.replace(",", " ").split()]
-            if len(values) != len(_ITEMS) or any(value < 0 for value in values):
+            value = int(text)
+            if value < 0:
                 raise ValueError
         except ValueError:
-            await send_message(chat_id, "Send exactly five non-negative whole numbers: plates cups bowls forks spoons.")
+            await send_message(chat_id, f"Please send a non-negative whole number for {_ITEM_LABELS[item]}.")
             return
-        state.update(quantities=dict(zip(_ITEMS, values)), step="date")
-        await send_message(chat_id, "What date is collection? Use YYYY-MM-DD.")
+        state["quantities"][item] = value
+        index = _ITEMS.index(item)
+        if index + 1 < len(_ITEMS):
+            next_item = _ITEMS[index + 1]
+            state["step"] = f"quantity_{next_item}"
+            await send_message(chat_id, f"How many {_ITEM_LABELS[next_item].split(' ', 1)[1].lower()} are needed?\nSend a whole number, or 0 if none.")
+        else:
+            state["step"] = "date"
+            await send_message(chat_id, "What date is collection?\nUse YYYY-MM-DD, for example 2026-10-15.")
     elif step == "date":
         try:
             state["date"] = date.fromisoformat(text)
@@ -175,7 +193,7 @@ async def _handle_disposable_step(chat_id: int, state: dict, text: str) -> None:
             await send_message(chat_id, "Please use YYYY-MM-DD, for example 2026-10-15.")
             return
         state["step"] = "time"
-        await send_message(chat_id, "What time is collection? Use HH:MM, or send - if no specific time.")
+        await send_message(chat_id, "What time is collection?\nUse HH:MM, for example 18:30, or send - if no specific time.")
     elif step == "time":
         if text == "-":
             state["time"] = None
@@ -186,16 +204,96 @@ async def _handle_disposable_step(chat_id: int, state: dict, text: str) -> None:
                 await send_message(chat_id, "Please use HH:MM, for example 18:30, or send -.")
                 return
         state["step"] = "description"
-        await send_message(chat_id, "Finally, send a short description explaining what the disposables are for. This will be sent to the admin for vetting.")
-    else:
+        await send_message(chat_id, "Finally, send a short description explaining what the disposables are for.\nThis will be sent to the admin for vetting.")
+    elif step == "description":
         if not text.strip():
             await send_message(chat_id, "Please include a description for the admin to vet.")
             return
-        await _save_telegram_disposable(chat_id, state, text.strip())
-        _conversation.pop(chat_id, None)
+        state["description"] = text.strip()
+        state["step"] = "confirmation"
+        await _send_disposable_summary(chat_id, state)
+    elif step == "confirmation":
+        answer = text.casefold().strip()
+        if answer in {"send", "submit", "yes", "confirm", "✅"}:
+            await _save_telegram_disposable(chat_id, state)
+            _conversation.pop(chat_id, None)
+        elif answer in {"edit", "change"}:
+            state["step"] = "edit_field"
+            await send_message(chat_id, "What would you like to edit?\nReply with: name, plates, cups, bowls, forks, spoons, date, time, or description.")
+        elif answer in {"cancel", "no"}:
+            _conversation.pop(chat_id, None)
+            await send_message(chat_id, "Your disposable request was cancelled.")
+        else:
+            await send_message(chat_id, "Reply SEND to submit, EDIT to change something, or CANCEL to discard this request.")
+    elif step == "edit_field":
+        field = text.casefold().strip()
+        aliases = {"name": "title", "request name": "title", "quantity": "quantity"}
+        field = aliases.get(field, field)
+        if field == "title" or field in {"date", "time", "description"}:
+            state["edit_field"] = field
+            state["step"] = "edit_value"
+            prompt = {"title": "Send the new request name.", "date": "Send the new collection date as YYYY-MM-DD.", "time": "Send the new collection time as HH:MM, or - to clear it.", "description": "Send the new description."}[field]
+            await send_message(chat_id, prompt)
+        elif field in _ITEMS:
+            state["edit_field"] = field
+            state["step"] = "edit_value"
+            await send_message(chat_id, f"Send the new quantity for {_ITEM_LABELS[field]}.")
+        else:
+            await send_message(chat_id, "I couldn't identify that field. Reply with name, plates, cups, bowls, forks, spoons, date, time, or description.")
+    elif step == "edit_value":
+        field = state["edit_field"]
+        try:
+            if field == "title":
+                if not 1 <= len(text) <= 255:
+                    raise ValueError
+                state["title"] = text
+            elif field in _ITEMS:
+                value = int(text)
+                if value < 0:
+                    raise ValueError
+                state["quantities"][field] = value
+            elif field == "date":
+                state["date"] = date.fromisoformat(text)
+            elif field == "time":
+                state["time"] = None if text == "-" else time.fromisoformat(text)
+            else:
+                if not text.strip():
+                    raise ValueError
+                state["description"] = text.strip()
+        except ValueError:
+            await send_message(chat_id, "That value is not valid. Please try again in the requested format.")
+            return
+        state.pop("edit_field", None)
+        state["step"] = "confirmation"
+        await _send_disposable_summary(chat_id, state)
 
 
-async def _save_telegram_disposable(chat_id: int, state: dict, description: str) -> None:
+def _disposable_summary(state: dict) -> str:
+    quantities = state["quantities"]
+    lines = [
+        "<b>Check your disposable request</b>",
+        f"<b>Name:</b> {escape(state['title'])}",
+        "",
+        "<b>Quantities:</b>",
+    ]
+    lines.extend(f"{_ITEM_LABELS[item]}: <b>{quantities.get(item, 0)}</b>" for item in _ITEMS)
+    lines.extend([
+        "",
+        f"<b>Collection date:</b> {escape(state['date'].isoformat())}",
+        f"<b>Collection time:</b> {escape(state['time'].isoformat() if state['time'] else 'Not specified')}",
+        f"<b>Description:</b> {escape(state['description'])}",
+        "",
+        "Reply <b>SEND</b> to submit, <b>EDIT</b> to change a field, or <b>CANCEL</b> to discard.",
+    ])
+    return "\n".join(lines)
+
+
+async def _send_disposable_summary(chat_id: int, state: dict) -> None:
+    await send_message(chat_id, _disposable_summary(state))
+
+
+async def _save_telegram_disposable(chat_id: int, state: dict) -> None:
+    description = state["description"]
     with SessionLocal() as db:
         user = _user(db, chat_id)
         if not user or user.status != UserStatus.approved:
@@ -203,7 +301,7 @@ async def _save_telegram_disposable(chat_id: int, state: dict, description: str)
             return
         cca = user.committee_memberships[0].committee.name if user.committee_memberships else None
         request = DisposableRequest(
-            requested_by=user.id, plates=state["quantities"]["plates"], cups=state["quantities"]["cups"],
+            requested_by=user.id, request_title=state["title"], plates=state["quantities"]["plates"], cups=state["quantities"]["cups"],
             bowls=state["quantities"]["bowls"], forks=state["quantities"]["forks"], spoons=state["quantities"]["spoons"],
             collection_date=state["date"], collection_time=state["time"], requester_cca=cca, description=description,
         )
@@ -211,11 +309,11 @@ async def _save_telegram_disposable(chat_id: int, state: dict, description: str)
         db.commit()
         requester_name, username = user.display_name or user.email, user.telegram_username
     await notify_admins_new_disposable_request(
-        "Standalone Telegram request", requester_name, committee_portfolio(user.committee_memberships[0].committee) if user.committee_memberships else None,
+        state["title"], requester_name, None,
         telegram_username=username, cca=cca, quantities=state["quantities"], collection_date=state["date"].isoformat(),
         collection_time=state["time"].isoformat() if state["time"] else None, description=description,
     )
-    await send_message(chat_id, "Your disposable request was sent to the admin for review.")
+    await send_message(chat_id, f"Your request <b>{escape(state['title'])}</b> was sent to the admin for review.")
 
 
 async def _handle_status(chat_id: int) -> None:
@@ -286,7 +384,7 @@ async def _handle_approve(chat_id: int, argument: str) -> None:
         disposable.rejected = False
         db.commit()
         recipient_id = disposable.requester.telegram_id
-        proposal_title = disposable.proposal.title if disposable.proposal else "your Telegram request"
+        proposal_title = disposable.proposal.title if disposable.proposal else (disposable.request_title or "your disposable request")
         collection_date = disposable.collection_date.isoformat()
     from bot.notifications import notify_user_disposable_approved
     await notify_user_disposable_approved(recipient_id, proposal_title, collection_date)
@@ -309,7 +407,7 @@ async def _handle_reject(chat_id: int, argument: str) -> None:
         disposable.rejected = True
         db.commit()
         recipient_id = disposable.requester.telegram_id
-        request_label = disposable.proposal.title if disposable.proposal else "your Telegram request"
+        request_label = disposable.proposal.title if disposable.proposal else (disposable.request_title or "your disposable request")
     from bot.notifications import notify_user_disposable_rejected
     await notify_user_disposable_rejected(recipient_id, request_label)
     await send_message(chat_id, f"Disposable request #{disposable_id} rejected.")

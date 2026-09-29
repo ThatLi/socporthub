@@ -78,7 +78,7 @@ class Settings(BaseSettings):
 
     @property
     def all_admin_telegram_id_set(self) -> set[int]:
-        return self.social_admin_telegram_id_set | self.welfare_admin_telegram_id_set
+        return self.admin_telegram_id_set | self.social_admin_telegram_id_set | self.welfare_admin_telegram_id_set
 
 
 @lru_cache

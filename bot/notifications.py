@@ -91,7 +91,7 @@ async def notify_user_new_comment(
 
 
 async def notify_admins_new_disposable_request(
-    proposal_title: str, requester_name: str, portfolio: Portfolio,
+    proposal_title: str, requester_name: str, portfolio: Portfolio | None,
     *, telegram_username: str | None = None, cca: str | None = None,
     quantities: dict[str, int] | None = None, collection_date: str | None = None,
     collection_time: str | None = None, description: str | None = None,
@@ -102,6 +102,7 @@ async def notify_admins_new_disposable_request(
         breakdown = ", ".join(f"{amount} {item}" for item, amount in quantities.items() if amount) or "none"
         text = (
             "🍽 <b>New disposable request</b>\n\n"
+            f"Request: {escape(proposal_title)}\n"
             f"Name: {escape(requester_name)}\n"
             f"Telegram: {escape(telegram_username or 'unknown')}\n"
             f"CCA: {escape(cca or 'unknown')}\n"
@@ -113,10 +114,10 @@ async def notify_admins_new_disposable_request(
         await send_message(admin_id, text)
 
 
-async def notify_user_disposable_approved(telegram_id: int, proposal_title: str, collection_date: str) -> None:
+async def notify_user_disposable_approved(telegram_id: int, request_title: str, collection_date: str) -> None:
     await send_message(
         telegram_id,
-        f"✅ Disposables approved for <b>{proposal_title}</b> — collect on {collection_date}.",
+        f"✅ Disposables approved for <b>{escape(request_title)}</b> — collect on {collection_date}.",
     )
 
 

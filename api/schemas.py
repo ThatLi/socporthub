@@ -220,6 +220,7 @@ class DisposableRequestOut(BaseModel):
     approved: bool
     rejected: bool = False
     requester_cca: str | None = None
+    request_title: str | None = None
     description: str | None = None
     created_at: datetime
 

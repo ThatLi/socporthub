@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/disposables", tags=["disposables"])
 
 
 def _to_out(d: DisposableRequest) -> DisposableRequestOut:
-    proposal_title = d.proposal.title if d.proposal else "Standalone Telegram request"
+    proposal_title = d.proposal.title if d.proposal else (d.request_title or "Disposable request")
     committee_name = d.proposal.committee.name if d.proposal else (d.requester_cca or "—")
     return DisposableRequestOut(
         id=d.id,
@@ -38,6 +38,7 @@ def _to_out(d: DisposableRequest) -> DisposableRequestOut:
         approved=d.approved,
         rejected=d.rejected,
         requester_cca=d.requester_cca,
+        request_title=d.request_title,
         description=d.description,
         created_at=d.created_at,
     )
@@ -144,7 +145,7 @@ async def update_disposable(
     db.commit()
     db.refresh(disposable)
 
-    request_label = disposable.proposal.title if disposable.proposal else "your Telegram request"
+    request_label = disposable.proposal.title if disposable.proposal else (disposable.request_title or "your disposable request")
     if req.approved:
         await notify_user_disposable_approved(
             disposable.requester.telegram_id, request_label, disposable.collection_date.isoformat()
@@ -153,3 +154,20 @@ async def update_disposable(
         await notify_user_disposable_rejected(disposable.requester.telegram_id, request_label)
 
     return _to_out(disposable)
+
+
+@router.delete("/{disposable_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_disposable(
+    disposable_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_user),
+) -> None:
+    if admin.role != UserRole.admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin access required")
+
+    disposable = db.get(DisposableRequest, disposable_id)
+    if not disposable:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Disposable request not found")
+
+    db.delete(disposable)
+    db.commit()

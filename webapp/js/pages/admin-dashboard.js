@@ -89,10 +89,10 @@ async function renderDisposablesSection(content) {
               </div>
               ${
                 r.approved
-                  ? `<span class="badge badge-approved">Approved</span>`
+                  ? `<span><span class="badge badge-approved">Approved</span> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
                   : r.rejected
-                    ? `<span class="badge">Rejected</span>`
-                    : `<span><button class="btn" style="width:auto; padding:6px 14px;" data-approve-disposable="${r.id}">Approve</button> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-reject-disposable="${r.id}">Reject</button></span>`
+                    ? `<span><span class="badge">Rejected</span> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
+                    : `<span><button class="btn" style="width:auto; padding:6px 14px;" data-approve-disposable="${r.id}">Approve</button> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-reject-disposable="${r.id}">Reject</button> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
               }
             </div>`
             )
@@ -113,6 +113,14 @@ async function renderDisposablesSection(content) {
     btn.addEventListener("click", async () => {
       btn.disabled = true;
       await api.patch(`/api/disposables/${btn.dataset.rejectDisposable}`, { approved: false });
+      renderDisposablesSection(content);
+    });
+  });
+  content.querySelectorAll("[data-delete-disposable]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!window.confirm("Delete this disposable request permanently?")) return;
+      btn.disabled = true;
+      await api.delete(`/api/disposables/${btn.dataset.deleteDisposable}`);
       renderDisposablesSection(content);
     });
   });
