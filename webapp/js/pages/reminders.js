@@ -114,6 +114,7 @@ function outboxCard(reminder, isAdmin) {
       <p style="color:var(--text); white-space:pre-wrap;">${escapeHtml(reminder.message)}</p>
       ${reminder.committees?.length ? `<p style="font-size:12px; color:var(--text-muted); margin-top:4px;">To: ${reminder.committees.map((c) => escapeHtml(c.name)).join(", ")}</p>` : ""}
       ${reminder.deadline ? `<p style="font-size:12px; color:var(--text-muted);">⏰ Due: ${formatDeadline(reminder.deadline)}</p>` : ""}
+      <div class="btn-row" style="margin-top:8px;"><button class="btn btn-secondary" data-delete-reminder="${reminder.id}">Delete reminder</button></div>
       ${
         recipients.length
           ? `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:12px; color:var(--text-muted);">${doneCount}/${recipients.length} marked done</summary>

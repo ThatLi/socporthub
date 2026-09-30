@@ -335,7 +335,27 @@ def delete_reminder(reminder_id: int, db: Session = Depends(get_db), admin: User
     if admin.role != UserRole.admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin access required")
     reminder = db.get(Reminder, reminder_id)
-    if not reminder or reminder.direction != ReminderDirection.to_admin:
+    if not reminder:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found")
+
+    # Remove scheduled nudge receipts and recipient/CCA rows first. This both
+    # prevents future Telegram nudges and avoids foreign-key errors when the
+    # broadcast itself is deleted.
+    recipient_ids = [
+        recipient_id
+        for (recipient_id,) in db.query(ReminderRecipient.id)
+        .filter(ReminderRecipient.reminder_id == reminder_id)
+        .all()
+    ]
+    if recipient_ids:
+        db.query(ReminderNudge).filter(ReminderNudge.reminder_recipient_id.in_(recipient_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(ReminderRecipient).filter(ReminderRecipient.reminder_id == reminder_id).delete(
+        synchronize_session=False
+    )
+    db.query(ReminderTargetCommittee).filter(ReminderTargetCommittee.reminder_id == reminder_id).delete(
+        synchronize_session=False
+    )
     db.delete(reminder)
     db.commit()
