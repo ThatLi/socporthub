@@ -44,7 +44,7 @@ def _admin_can_see_reminder(db: Session, reminder: Reminder, admin: User) -> boo
         return bool(proposal and admin_can_access_committee(admin, proposal.committee))
     if reminder.target_type == ReminderTargetType.disposable and reminder.target_id:
         disposable = db.get(DisposableRequest, reminder.target_id)
-        return bool(disposable and admin_can_access_committee(admin, disposable.proposal.committee))
+        return bool(disposable and admin_can_access_committee(admin, disposable.committee))
     return any(admin_can_access_committee(admin, m.committee) for m in reminder.sender.committee_memberships)
 
 
@@ -122,7 +122,7 @@ async def create_reminder(req: ReminderCreate, db: Session = Depends(get_db), us
             user.role != UserRole.admin and disposable.requested_by != user.id
         ) or (
             user.role == UserRole.admin
-            and not admin_can_access_committee(user, disposable.proposal.committee)
+            and not admin_can_access_committee(user, disposable.committee)
         ):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Disposable request not found")
 

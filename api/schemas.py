@@ -2,7 +2,16 @@ from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from api.models import Portfolio, ProposalCategory, ProposalStatus, ReminderDirection, ReminderTargetType, UserRole, UserStatus
+from api.models import (
+    DisposableStatus,
+    Portfolio,
+    ProposalCategory,
+    ProposalStatus,
+    ReminderDirection,
+    ReminderTargetType,
+    UserRole,
+    UserStatus,
+)
 
 
 # --- Auth ---
@@ -15,7 +24,7 @@ class ValidateResponse(BaseModel):
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    telegram_username: str
+    telegram_username: str | None = None
     display_name: str | None = None
 
 
@@ -65,6 +74,7 @@ class UserUpdateRequest(BaseModel):
     telegram_username: str | None = None
     status: UserStatus | None = None
     committee_ids: list[int] | None = None
+    rejection_reason: str | None = Field(default=None, max_length=1000)
 
 
 # --- Proposals ---
@@ -187,18 +197,23 @@ class ProposalStatusHistoryOut(BaseModel):
 
 
 class DisposableRequestUpsert(BaseModel):
-    plates: int = 0
-    cups: int = 0
-    bowls: int = 0
-    forks: int = 0
-    spoons: int = 0
+    plates: int = Field(default=0, ge=0)
+    cups: int = Field(default=0, ge=0)
+    bowls: int = Field(default=0, ge=0)
+    forks: int = Field(default=0, ge=0)
+    spoons: int = Field(default=0, ge=0)
     collection_date: date
     collection_time: str | None = None
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=2000)
 
 
 class DisposableRequestUpdate(BaseModel):
     approved: bool
+
+
+class DisposableDecisionRequest(BaseModel):
+    status: DisposableStatus
+    reason: str | None = Field(default=None, max_length=1000)
 
 
 class DisposableRequestOut(BaseModel):
@@ -206,7 +221,10 @@ class DisposableRequestOut(BaseModel):
 
     id: int
     proposal_id: int | None
+    committee_id: int
     proposal_title: str
+    activity_name: str
+    description: str | None
     committee_name: str
     requested_by: int
     requester_name: str | None
@@ -218,10 +236,8 @@ class DisposableRequestOut(BaseModel):
     collection_date: date
     collection_time: str | None
     approved: bool
-    rejected: bool = False
-    requester_cca: str | None = None
-    request_title: str | None = None
-    description: str | None = None
+    status: DisposableStatus
+    rejection_reason: str | None
     created_at: datetime
 
 

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_admin, get_current_user
 from api.database import get_db
-from api.models import EmailDraft, Portfolio, Proposal, ProposalStatus, User, UserRole
+from api.models import DisposableStatus, EmailDraft, Portfolio, Proposal, ProposalStatus, User, UserRole
 from api.portfolio import committee_portfolio, sends_confirmation_email
 from api.schemas import EmailDraftOut, EmailDraftUpdate
 from api.services.resend_email import send_email
@@ -69,7 +69,7 @@ def _generated(proposal: Proposal) -> tuple[str, str]:
         f"Time: {proposal.event_time.strftime('%H:%M') if proposal.event_time else 'Not set'}",
         f"Description: {proposal.description or 'Not provided'}",
     ]
-    if disposable and disposable.approved:
+    if disposable and disposable.status == DisposableStatus.approved:
         lines += [
             "",
             f"Hall disposables have been approved for collection on {disposable.collection_date}:",

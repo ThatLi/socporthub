@@ -63,6 +63,12 @@ class ReminderDirection(str, enum.Enum):
     to_user = "to_user"
 
 
+class DisposableStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class Portfolio(str, enum.Enum):
     social = "social"
     welfare = "welfare"
@@ -99,6 +105,7 @@ class Committee(Base):
     memberships: Mapped[list["UserCommittee"]] = relationship(back_populates="committee")
     proposals: Mapped[list["Proposal"]] = relationship(back_populates="committee")
     calendar_events: Mapped[list["CalendarEvent"]] = relationship(back_populates="committee")
+    disposable_requests: Mapped[list["DisposableRequest"]] = relationship(back_populates="committee")
 
 
 class User(Base):
@@ -246,9 +253,11 @@ class DisposableRequest(Base):
     __tablename__ = "disposable_requests"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Telegram users can request disposables without creating a synthetic proposal.
-    proposal_id: Mapped[int | None] = mapped_column(ForeignKey("proposals.id"), unique=True, nullable=True)
+    proposal_id: Mapped[int | None] = mapped_column(ForeignKey("proposals.id"), unique=True)
+    committee_id: Mapped[int] = mapped_column(ForeignKey("committees.id"), nullable=False)
     requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    activity_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
     plates: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     cups: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     bowls: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -256,15 +265,33 @@ class DisposableRequest(Base):
     spoons: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     collection_date: Mapped[date] = mapped_column(Date, nullable=False)
     collection_time: Mapped[time | None] = mapped_column(Time)
-    approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    rejected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    requester_cca: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    request_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[DisposableStatus] = mapped_column(
+        Enum(DisposableStatus, native_enum=False), default=DisposableStatus.pending, nullable=False
+    )
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    proposal: Mapped["Proposal"] = relationship(back_populates="disposable_request")
+    proposal: Mapped["Proposal | None"] = relationship(back_populates="disposable_request")
+    committee: Mapped["Committee"] = relationship(back_populates="disposable_requests")
     requester: Mapped["User"] = relationship()
+
+    @property
+    def approved(self) -> bool:
+        """Compatibility property for clients that still consume a Boolean."""
+        return self.status == DisposableStatus.approved
+
+
+class BotConversation(Base):
+    __tablename__ = "bot_conversations"
+
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    flow: Mapped[str] = mapped_column(String(32), nullable=False)
+    step: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class CalendarEvent(Base):

@@ -6,7 +6,6 @@ venv/
 dev.db
 *.db
 *.db.*
-requirements-dev.txt
 .env.example
 # Local grading demo data (kept on disk, never committed).
 /grading-preview.db*

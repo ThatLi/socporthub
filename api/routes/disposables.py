@@ -1,13 +1,21 @@
-from datetime import date, time
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
+from api.config import get_settings
 from api.database import get_db
-from api.models import DisposableRequest, Proposal, User, UserRole
-from api.portfolio import admin_committee_filter, committee_portfolio
-from api.schemas import DisposableRequestOut, DisposableRequestUpdate, DisposableRequestUpsert
+from api.models import DisposableRequest, DisposableStatus, User, UserRole
+from api.portfolio import admin_can_access_committee, admin_committee_filter, committee_portfolio
+from api.schemas import (
+    DisposableDecisionRequest,
+    DisposableRequestOut,
+    DisposableRequestUpdate,
+    DisposableRequestUpsert,
+)
+from api.services.disposables import decide_disposable
 from bot.notifications import (
     notify_admins_new_disposable_request,
     notify_user_disposable_approved,
@@ -18,14 +26,19 @@ from api.routes.proposals import get_visible_proposal
 router = APIRouter(prefix="/api/disposables", tags=["disposables"])
 
 
+def _app_today() -> date:
+    return datetime.now(ZoneInfo(get_settings().app_timezone)).date()
+
+
 def _to_out(d: DisposableRequest) -> DisposableRequestOut:
-    proposal_title = d.proposal.title if d.proposal else (d.request_title or "Disposable request")
-    committee_name = d.proposal.committee.name if d.proposal else (d.requester_cca or "—")
     return DisposableRequestOut(
         id=d.id,
         proposal_id=d.proposal_id,
-        proposal_title=proposal_title,
-        committee_name=committee_name,
+        committee_id=d.committee_id,
+        proposal_title=d.activity_name,
+        activity_name=d.activity_name,
+        description=d.description,
+        committee_name=d.committee.name,
         requested_by=d.requested_by,
         requester_name=d.requester.display_name,
         plates=d.plates,
@@ -36,10 +49,8 @@ def _to_out(d: DisposableRequest) -> DisposableRequestOut:
         collection_date=d.collection_date,
         collection_time=d.collection_time.isoformat() if d.collection_time else None,
         approved=d.approved,
-        rejected=d.rejected,
-        requester_cca=d.requester_cca,
-        request_title=d.request_title,
-        description=d.description,
+        status=d.status,
+        rejection_reason=d.rejection_reason,
         created_at=d.created_at,
     )
 
@@ -57,10 +68,7 @@ def list_disposables(
     elif user.role != UserRole.admin:
         query = query.filter(DisposableRequest.requested_by == user.id)
     else:
-        query = query.outerjoin(DisposableRequest.proposal).outerjoin(Proposal.committee)
-        # Standalone requests are deliberately visible to admins for vetting;
-        # proposal-backed requests retain the existing portfolio restriction.
-        query = query.filter((DisposableRequest.proposal_id.is_(None)) | admin_committee_filter(user))
+        query = query.join(DisposableRequest.committee).filter(admin_committee_filter(user))
     requests = query.order_by(DisposableRequest.collection_date).all()
     return [_to_out(d) for d in requests]
 
@@ -74,9 +82,9 @@ def todays_collections(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin access required")
     requests = (
         db.query(DisposableRequest)
-        .outerjoin(DisposableRequest.proposal).outerjoin(Proposal.committee)
-        .filter(DisposableRequest.approved.is_(True), DisposableRequest.collection_date == date.today())
-        .filter((DisposableRequest.proposal_id.is_(None)) | admin_committee_filter(admin))
+        .join(DisposableRequest.committee)
+        .filter(DisposableRequest.status == DisposableStatus.approved, DisposableRequest.collection_date == _app_today())
+        .filter(admin_committee_filter(admin))
         .all()
     )
     return [_to_out(d) for d in requests]
@@ -89,30 +97,41 @@ async def upsert_disposable(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> DisposableRequestOut:
+    if not any((req.plates, req.cups, req.bowls, req.forks, req.spoons)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "At least one disposable quantity must be greater than zero")
+    if req.collection_date < _app_today():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Collection date cannot be in the past")
     proposal = get_visible_proposal(db, user, proposal_id)
     if proposal.submitted_by != user.id and user.role != UserRole.admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the proposal owner can request disposables")
 
     existing = db.query(DisposableRequest).filter(DisposableRequest.proposal_id == proposal_id).first()
-    if existing and existing.approved and user.role != UserRole.admin:
+    if existing and existing.status == DisposableStatus.approved and user.role != UserRole.admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Approved requests can only be changed by an admin")
 
     is_new = existing is None
-    disposable = existing or DisposableRequest(proposal_id=proposal_id, requested_by=user.id)
+    disposable = existing or DisposableRequest(
+        proposal_id=proposal_id,
+        committee_id=proposal.committee_id,
+        requested_by=user.id,
+        activity_name=proposal.title,
+    )
+    disposable.committee_id = proposal.committee_id
+    disposable.activity_name = proposal.title
+    disposable.description = req.description
     disposable.plates = req.plates
     disposable.cups = req.cups
     disposable.bowls = req.bowls
     disposable.forks = req.forks
     disposable.spoons = req.spoons
     disposable.collection_date = req.collection_date
-    disposable.description = req.description
-    disposable.rejected = False
     try:
-        disposable.collection_time = time.fromisoformat(req.collection_time) if req.collection_time else None
+        disposable.collection_time = datetime.strptime(req.collection_time, "%H:%M").time() if req.collection_time else None
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "collection_time must use HH:MM format") from exc
     if not is_new and user.role != UserRole.admin:
-        disposable.approved = False  # editing a request re-opens it for admin review
+        disposable.status = DisposableStatus.pending  # editing re-opens it for admin review
+        disposable.rejection_reason = None
 
     db.add(disposable)
     db.commit()
@@ -120,7 +139,10 @@ async def upsert_disposable(
 
     if is_new:
         await notify_admins_new_disposable_request(
-            proposal.title, user.display_name or user.email, committee_portfolio(proposal.committee),
+            proposal.title,
+            user.display_name or user.email,
+            committee_portfolio(proposal.committee),
+            disposable.id,
         )
 
     return _to_out(disposable)
@@ -133,26 +155,36 @@ async def update_disposable(
     db: Session = Depends(get_db),
     admin: User = Depends(get_current_user),
 ) -> DisposableRequestOut:
-    if admin.role != UserRole.admin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin access required")
-
-    disposable = db.get(DisposableRequest, disposable_id)
-    if not disposable:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Disposable request not found")
-
-    disposable.approved = req.approved
-    disposable.rejected = not req.approved
-    db.commit()
-    db.refresh(disposable)
-
-    request_label = disposable.proposal.title if disposable.proposal else (disposable.request_title or "your disposable request")
-    if req.approved:
+    decision = DisposableStatus.approved if req.approved else DisposableStatus.rejected
+    disposable, changed = decide_disposable(db, admin, disposable_id, decision)
+    if changed and decision == DisposableStatus.approved:
         await notify_user_disposable_approved(
-            disposable.requester.telegram_id, request_label, disposable.collection_date.isoformat()
+            disposable.requester.telegram_id, disposable.activity_name, disposable.collection_date.isoformat()
         )
-    else:
-        await notify_user_disposable_rejected(disposable.requester.telegram_id, request_label)
+    elif changed:
+        await notify_user_disposable_rejected(
+            disposable.requester.telegram_id, disposable.activity_name, disposable.rejection_reason
+        )
 
+    return _to_out(disposable)
+
+
+@router.post("/{disposable_id}/decision", response_model=DisposableRequestOut)
+async def decide_request(
+    disposable_id: int,
+    req: DisposableDecisionRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_user),
+) -> DisposableRequestOut:
+    disposable, changed = decide_disposable(db, admin, disposable_id, req.status, req.reason)
+    if changed and req.status == DisposableStatus.approved:
+        await notify_user_disposable_approved(
+            disposable.requester.telegram_id, disposable.activity_name, disposable.collection_date.isoformat()
+        )
+    elif changed:
+        await notify_user_disposable_rejected(
+            disposable.requester.telegram_id, disposable.activity_name, disposable.rejection_reason
+        )
     return _to_out(disposable)
 
 
@@ -164,10 +196,8 @@ def delete_disposable(
 ) -> None:
     if admin.role != UserRole.admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin access required")
-
     disposable = db.get(DisposableRequest, disposable_id)
-    if not disposable:
+    if not disposable or not admin_can_access_committee(admin, disposable.committee):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Disposable request not found")
-
     db.delete(disposable)
     db.commit()

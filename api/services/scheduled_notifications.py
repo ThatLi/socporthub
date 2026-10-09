@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from api.config import get_settings
 from api.database import SessionLocal
-from api.models import DisposableRequest, Portfolio
+from api.models import DisposableRequest, DisposableStatus, Portfolio, Proposal, ProposalStatus
 from api.portfolio import committee_portfolio
 from bot.notifications import notify_admins_todays_collections
 
@@ -60,15 +60,18 @@ async def collection_reminder_loop() -> None:
                 with SessionLocal() as db:
                     requests = (
                         db.query(DisposableRequest)
-                        .filter(DisposableRequest.approved.is_(True), DisposableRequest.collection_date == now.date())
+                        .filter(
+                            DisposableRequest.status == DisposableStatus.approved,
+                            DisposableRequest.collection_date == now.date(),
+                        )
                         .all()
                     )
                     collections = [
                         {
-                            "title": r.proposal.title,
-                            "committee": r.proposal.committee.name,
+                            "title": r.activity_name,
+                            "committee": r.committee.name,
                             "time": r.collection_time.strftime("%H:%M") if r.collection_time else "time not set",
-                            "portfolio": committee_portfolio(r.proposal.committee),
+                            "portfolio": committee_portfolio(r.committee),
                             "plates": r.plates,
                             "cups": r.cups,
                             "bowls": r.bowls,
