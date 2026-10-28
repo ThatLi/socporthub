@@ -16,6 +16,19 @@ def _api_url(method: str) -> str:
     return f"{TELEGRAM_API_BASE.format(token=token)}/{method}"
 
 
+async def get_bot_username() -> str | None:
+    if not get_settings().telegram_bot_token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(_api_url("getMe"))
+            resp.raise_for_status()
+        return resp.json()["result"]["username"]
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        logger.warning("Failed to get Telegram bot username (%s)", type(exc).__name__)
+        return None
+
+
 async def send_message(
     chat_id: int, text: str, reply_markup: dict | None = None, *, raise_on_error: bool = False
 ) -> None:

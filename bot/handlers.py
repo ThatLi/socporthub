@@ -10,7 +10,7 @@ from api.config import get_settings
 from api.database import SessionLocal
 from api.models import Committee, DisposableRequest, Proposal, ProposalStatus, Reminder, ReminderTargetType, User, UserCommittee, UserRole, UserStatus
 from api.portfolio import admin_committee_filter, committee_portfolio
-from api.services.telegram import send_message, webapp_open_markup
+from api.services.telegram import get_bot_username, send_message, webapp_open_markup
 from bot.notifications import notify_admins_new_disposable_request
 
 logger = logging.getLogger(__name__)
@@ -21,10 +21,10 @@ HELP_TEXT = (
     "/register — Register your name, Telegram handle and CCA\n"
     "/disposable — Request disposable items without opening the app\n"
     "/pending — Admins: show pending requests\n"
-    "/approve <id> — Admins: approve a disposable request\n"
-    "/reject <id> — Admins: reject a disposable request\n"
+    "/approve &lt;id&gt; — Admins: approve a disposable request\n"
+    "/reject &lt;id&gt; — Admins: reject a disposable request\n"
     "/status — Show your proposal status\n"
-    "/remind <message> — Nudge the admin\n"
+    "/remind &lt;message&gt; — Nudge the admin\n"
     "/help — Show this message\n\n"
     "Use the app to submit event proposals, track their status, and manage your "
     "committee's activity."
@@ -47,6 +47,11 @@ async def handle_update(update: dict) -> None:
         return
 
     command, _, argument = text.partition(" ")
+    if command.startswith("/") and "@" in command:
+        command, _, recipient = command.partition("@")
+        username = await get_bot_username()
+        if not username or recipient.casefold() != username.casefold():
+            return
     if command == "/register":
         await _handle_register_start(chat_id)
     elif command == "/disposable":
