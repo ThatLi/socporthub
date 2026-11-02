@@ -92,6 +92,7 @@ async def notify_user_new_comment(
 
 async def notify_admins_new_disposable_request(
     proposal_title: str, requester_name: str, portfolio: Portfolio | None,
+    request_id: int | None = None,
     *, telegram_username: str | None = None, cca: str | None = None,
     quantities: dict[str, int] | None = None, collection_date: str | None = None,
     collection_time: str | None = None, description: str | None = None,
@@ -110,8 +111,16 @@ async def notify_admins_new_disposable_request(
             f"Collection: {escape(collection_date or '—')} {escape(collection_time or '')}\n"
             f"Description: {escape(description or '—')}"
         )
+    markup = None
+    if request_id is not None:
+        markup = {
+            "inline_keyboard": [[
+                {"text": "Approve", "callback_data": f"admin:disp:approve:{request_id}"},
+                {"text": "Reject", "callback_data": f"admin:disp:reject:{request_id}"},
+            ]]
+        }
     for admin_id in _admin_ids(portfolio):
-        await send_message(admin_id, text)
+        await send_message(admin_id, text, reply_markup=markup)
 
 
 async def notify_user_disposable_approved(telegram_id: int, request_title: str, collection_date: str) -> None:
@@ -121,8 +130,39 @@ async def notify_user_disposable_approved(telegram_id: int, request_title: str, 
     )
 
 
-async def notify_user_disposable_rejected(telegram_id: int, request_label: str) -> None:
-    await send_message(telegram_id, f"❌ Your disposable request for <b>{escape(request_label)}</b> was rejected.")
+async def notify_user_disposable_rejected(
+    telegram_id: int, request_label: str, reason: str | None = None
+) -> None:
+    text = f"❌ Your disposable request for <b>{escape(request_label)}</b> was rejected."
+    if reason:
+        text += f"\n\nReason: {escape(reason)}"
+    await send_message(telegram_id, text)
+
+
+async def notify_admins_registration_request(user: User, committee, portfolio: Portfolio) -> None:
+    text = (
+        "📝 New registration pending approval\n\n"
+        f"Name: <b>{escape(user.display_name or user.email)}</b>\n"
+        f"Email: {escape(user.email)}\n"
+        f"CCA: {escape(committee.name)}"
+    )
+    markup = {
+        "inline_keyboard": [[
+            {"text": "Approve", "callback_data": f"admin:reg:approve:{user.id}"},
+            {"text": "Reject", "callback_data": f"admin:reg:reject:{user.id}"},
+        ]]
+    }
+    for admin_id in _admin_ids(portfolio):
+        await send_message(admin_id, text, reply_markup=markup)
+
+
+async def notify_user_registration_rejected_with_reason(
+    telegram_id: int, reason: str | None = None
+) -> None:
+    text = "Your Social Port Hub registration was not approved."
+    if reason:
+        text += f"\n\nReason: {escape(reason)}"
+    await send_message(telegram_id, text)
 
 
 async def notify_user_email_sent(telegram_id: int, proposal_title: str) -> None:

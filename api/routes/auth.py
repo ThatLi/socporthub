@@ -65,7 +65,7 @@ async def register(
 
     user = User(
         telegram_id=identity.telegram_id,
-        telegram_username=normalize_telegram_username(req.telegram_username),
+        telegram_username=normalize_telegram_username(req.telegram_username) if req.telegram_username else None,
         email=req.email,
         display_name=display_name,
         role=UserRole.admin if is_admin else UserRole.user,

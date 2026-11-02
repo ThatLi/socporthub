@@ -129,6 +129,11 @@ pytest
 5. Add your own numeric Telegram user ID to `ADMIN_TELEGRAM_IDS` (comma-separated) so you
    land in the admin dashboard instead of the registration flow.
 
+The bot supports persistent `/register` and `/disposable` conversations. Users can use
+`/cancel` (or the inline Cancel button) at any step; unfinished conversations remain in
+the database until they are submitted or cancelled. Registration and disposable
+decisions are available from both Telegram inline buttons and the admin WebApp.
+
 ## Calendar
 
 Events live entirely in our own Postgres table (`calendar_events`) — created, listed,
@@ -160,9 +165,9 @@ serve the feed with no token (fine for local dev).
 
 ```
 api/         FastAPI app, models, routes, services (Telegram, Resend, Google Docs/Drive/Forms)
-bot/         Telegram webhook update handling (/start, /help, /status, /remind) + outbound notifications
+bot/         Telegram commands and persistent registration/disposable conversations + outbound notifications
 webapp/      Vanilla JS SPA (Telegram WebApp UI)
-migrations/  Alembic (22 migrations, schema history)
+migrations/  Alembic (24 migrations, schema history)
 docs/        Feature-specific operational docs (e.g. grading setup)
 tests/       pytest — auth, proposals, calendar/disposables, grading
 ```

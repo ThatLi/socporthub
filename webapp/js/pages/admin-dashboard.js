@@ -63,7 +63,7 @@ async function renderDisposablesSection(content) {
   content.innerHTML = dates
     .map((d) => {
       const items = byDate.get(d);
-      const totals = items.reduce(
+      const totals = items.filter((item) => item.status !== "rejected").reduce(
         (acc, r) => ({
           plates: acc.plates + r.plates,
           cups: acc.cups + r.cups,
@@ -83,15 +83,16 @@ async function renderDisposablesSection(content) {
               (r) => `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-top:1px solid var(--border);">
               <div>
-                <div style="font-size:13px; font-weight:600;">${escapeHtml(r.proposal_title)}</div>
-                <div style="font-size:12px; color:var(--text-muted)">${escapeHtml(r.committee_name)} · ${escapeHtml(r.requester_name || "")}${r.requester_cca ? ` · ${escapeHtml(r.requester_cca)}` : ""}</div>
+                <div style="font-size:13px; font-weight:600;">${escapeHtml(r.activity_name || r.proposal_title)}</div>
+                <div style="font-size:12px; color:var(--text-muted)">${escapeHtml(r.committee_name)} · ${escapeHtml(r.requester_name || "")}</div>
                 ${r.description ? `<div style="font-size:12px; margin-top:4px;">${escapeHtml(r.description)}</div>` : ""}
+                ${r.rejection_reason ? `<div style="font-size:12px; color:var(--red-text); margin-top:4px;">Reason: ${escapeHtml(r.rejection_reason)}</div>` : ""}
               </div>
               ${
-                r.approved
+                r.status === "approved"
                   ? `<span><span class="badge badge-approved">Approved</span> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
-                  : r.rejected
-                    ? `<span><span class="badge">Rejected</span> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
+                  : r.status === "rejected"
+                    ? `<span><span class="badge badge-rejected">Rejected</span> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
                     : `<span><button class="btn" style="width:auto; padding:6px 14px;" data-approve-disposable="${r.id}">Approve</button> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-reject-disposable="${r.id}">Reject</button> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
               }
             </div>`
@@ -105,14 +106,19 @@ async function renderDisposablesSection(content) {
   content.querySelectorAll("[data-approve-disposable]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       btn.disabled = true;
-      await api.patch(`/api/disposables/${btn.dataset.approveDisposable}`, { approved: true });
+      await api.post(`/api/disposables/${btn.dataset.approveDisposable}/decision`, { status: "approved" });
       renderDisposablesSection(content);
     });
   });
   content.querySelectorAll("[data-reject-disposable]").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      const reason = window.prompt("Optional rejection reason:", "");
+      if (reason === null) return;
       btn.disabled = true;
-      await api.patch(`/api/disposables/${btn.dataset.rejectDisposable}`, { approved: false });
+      await api.post(`/api/disposables/${btn.dataset.rejectDisposable}/decision`, {
+        status: "rejected",
+        reason: reason.trim() || null,
+      });
       renderDisposablesSection(content);
     });
   });
@@ -181,7 +187,7 @@ async function renderProposalsSection(content, committeeId = null, statusFilter 
 async function renderUsersSection(content) {
   const [users, committees] = await Promise.all([
     api.get("/api/admin/users"),
-    api.get("/api/committees?all_committees=true"),
+    api.get("/api/committees"),
   ]);
 
   const pending = users.filter((u) => u.status === "pending");
