@@ -89,3 +89,21 @@ async def collection_reminder_loop() -> None:
         except Exception:
             logger.exception("Scheduled collection reminder failed")
         await asyncio.sleep(60 * 10)
+
+
+async def borrow_reminder_loop() -> None:
+    """Return reminders for borrowed tables/cambro. Runs after the same morning hour as the
+    disposable digest so nobody is pinged at midnight; receipts are stored on each row."""
+    from api.services.borrowing import process_borrow_reminders
+    while True:
+        try:
+            settings = get_settings()
+            now = datetime.now(ZoneInfo(settings.app_timezone))
+            if now.hour >= settings.collection_reminder_hour:
+                with SessionLocal() as db:
+                    await process_borrow_reminders(db, now.date())
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Borrow reminder scheduler failed; will retry")
+        await asyncio.sleep(60 * 10)

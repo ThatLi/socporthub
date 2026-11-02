@@ -4,7 +4,7 @@ notification flow table. Routes call these instead of building message text inli
 from html import escape
 
 from api.config import get_settings
-from api.services.telegram import send_message, send_photo
+from api.services.telegram import send_message, send_photo, send_photo_by_file_id
 from api.models import Portfolio, User
 
 # Telegram's sendPhoto caption limit; longer blast messages go as a follow-up
@@ -241,4 +241,104 @@ async def notify_admins_todays_collections(
     total = ", ".join(f"{grand_total[item]} {item}" for item in quantities if grand_total[item]) or "no items"
     lines.append(f"\n<b>Total for {escape(portfolio.value.title())}: {total}</b>")
     for admin_id in _admin_ids(portfolio):
+        await send_message(admin_id, "\n".join(lines))
+
+
+# --- Borrowing the shared tables and cambro ---
+
+
+async def notify_admins_new_borrow_request(
+    request_id: int, requester_name: str, telegram_username: str | None, cca: str, activity: str,
+    items: str, borrow_date: str, return_date: str, description: str | None,
+) -> None:
+    text = (
+        "📦 <b>New borrow request</b>\n\n"
+        f"Name: {escape(requester_name)}\n"
+        f"Telegram: {escape(telegram_username or 'unknown')}\n"
+        f"CCA: {escape(cca)}\n"
+        f"Activity: {escape(activity)}\n"
+        f"Items: <b>{escape(items)}</b>\n"
+        f"Borrow: {escape(borrow_date)} → Return: {escape(return_date)}\n"
+        f"Description: {escape(description or '—')}"
+    )
+    markup = {
+        "inline_keyboard": [[
+            {"text": "Approve", "callback_data": f"admin:borrow:approve:{request_id}"},
+            {"text": "Reject", "callback_data": f"admin:borrow:reject:{request_id}"},
+        ]]
+    }
+    for admin_id in _admin_ids():
+        await send_message(admin_id, text, reply_markup=markup)
+
+
+async def notify_user_borrow_approved(telegram_id: int, activity: str, items: str, return_date: str) -> None:
+    await send_message(
+        telegram_id,
+        f"✅ Borrow approved for <b>{escape(activity)}</b>: {escape(items)}.\n\n"
+        f"Please return by <b>{escape(return_date)}</b> and send a photo as proof with /return.",
+    )
+
+
+async def notify_user_borrow_rejected(telegram_id: int, activity: str, reason: str | None = None) -> None:
+    text = f"❌ Your borrow request for <b>{escape(activity)}</b> was rejected."
+    if reason:
+        text += f"\n\nReason: {escape(reason)}"
+    await send_message(telegram_id, text)
+
+
+async def notify_admins_return_proof(
+    request_id: int, borrower: str, activity: str, items: str, file_id: str
+) -> None:
+    caption = (
+        "📸 <b>Return proof received</b>\n\n"
+        f"From: {escape(borrower)}\nActivity: {escape(activity)}\nItems: {escape(items)}\n\n"
+        "Are the items back?"
+    )
+    markup = {
+        "inline_keyboard": [[
+            {"text": "Confirm returned", "callback_data": f"admin:borrow:confirm:{request_id}"},
+            {"text": "Not yet", "callback_data": f"admin:borrow:notyet:{request_id}"},
+        ]]
+    }
+    for admin_id in _admin_ids():
+        await send_photo_by_file_id(admin_id, file_id, caption, markup)
+
+
+async def notify_user_return_confirmed(telegram_id: int, activity: str) -> None:
+    await send_message(telegram_id, f"✅ Return confirmed for <b>{escape(activity)}</b>. Thank you!")
+
+
+async def notify_user_return_not_confirmed(telegram_id: int, request_id: int, activity: str) -> None:
+    markup = {"inline_keyboard": [[{"text": "Send another photo", "callback_data": f"borrow:return:{request_id}"}]]}
+    await send_message(
+        telegram_id,
+        f"The owner could not confirm the return for <b>{escape(activity)}</b>. "
+        "Please return the items and send a clearer photo.",
+        markup,
+    )
+
+
+async def notify_user_borrow_reminder(
+    telegram_id: int, request_id: int, activity: str, items: str, return_date: str, kind: str
+) -> None:
+    if kind == "day_before":
+        text = f"⏰ Reminder: {escape(items)} for <b>{escape(activity)}</b> must be returned tomorrow ({escape(return_date)})."
+    elif kind == "due":
+        text = f"⏰ {escape(items)} for <b>{escape(activity)}</b> is due back <b>today</b>."
+    else:
+        text = f"⚠️ {escape(items)} for <b>{escape(activity)}</b> was due on {escape(return_date)} and is overdue."
+    text += "\n\nOnce returned, send a photo as proof."
+    markup = {"inline_keyboard": [[{"text": "Send return photo", "callback_data": f"borrow:return:{request_id}"}]]}
+    await send_message(telegram_id, text, markup)
+
+
+async def notify_admins_overdue_borrows(items: list[dict]) -> None:
+    lines = ["⚠️ <b>Overdue borrowed items</b>"]
+    for item in items:
+        who = escape(item["borrower"]) + (f" ({escape(item['username'])})" if item.get("username") else "")
+        lines.append(
+            f"#{item['id']} {escape(item['items'])} — {escape(item['activity'])}\n"
+            f"   {who}, due {escape(item['return_date'])} ({item['days']}d overdue)"
+        )
+    for admin_id in _admin_ids():
         await send_message(admin_id, "\n".join(lines))

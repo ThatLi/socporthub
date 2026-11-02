@@ -4,13 +4,14 @@ import asyncio
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
-from api.routes import auth, bug_reports, calendar, committees, disposables, email, proposals, reminders, telegram_webhook, users
+from api.routes import auth, borrow, bug_reports, calendar, committees, disposables, email, proposals, reminders, telegram_webhook, users
 from api.routes import grading, ai_review
 
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Social Port Hub API")
 collection_reminder_task = None
+borrow_reminder_task = None
 grading_task = None
 reminder_nudge_task = None
 
@@ -25,11 +26,16 @@ async def disable_webapp_asset_caching(request: Request, call_next):
 
 @app.on_event("startup")
 async def start_scheduled_notifications() -> None:
-    global collection_reminder_task, grading_task, reminder_nudge_task
+    global collection_reminder_task, grading_task, reminder_nudge_task, borrow_reminder_task
     from api.config import get_settings
     if get_settings().environment == "production":
-        from api.services.scheduled_notifications import collection_reminder_loop, reminder_nudge_loop
+        from api.services.scheduled_notifications import (
+            borrow_reminder_loop,
+            collection_reminder_loop,
+            reminder_nudge_loop,
+        )
         collection_reminder_task = asyncio.create_task(collection_reminder_loop())
+        borrow_reminder_task = asyncio.create_task(borrow_reminder_loop())
         reminder_nudge_task = asyncio.create_task(reminder_nudge_loop())
     if get_settings().grading_enabled:
         from api.services.scheduled_notifications import grading_loop
@@ -44,6 +50,8 @@ async def stop_scheduled_notifications() -> None:
         grading_task.cancel()
     if reminder_nudge_task:
         reminder_nudge_task.cancel()
+    if borrow_reminder_task:
+        borrow_reminder_task.cancel()
 
 app.include_router(auth.router)
 app.include_router(bug_reports.router)
@@ -54,6 +62,7 @@ app.include_router(grading.router)
 app.include_router(ai_review.router)
 app.include_router(calendar.router)
 app.include_router(disposables.router)
+app.include_router(borrow.router)
 app.include_router(email.router)
 app.include_router(reminders.router)
 app.include_router(telegram_webhook.router)

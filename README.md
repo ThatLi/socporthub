@@ -134,6 +134,20 @@ The bot supports persistent `/register` and `/disposable` conversations. Users c
 the database until they are submitted or cancelled. Registration and disposable
 decisions are available from both Telegram inline buttons and the admin WebApp.
 
+### Borrowing tables and the cambro
+
+`/borrow` lets an approved member request the shared foldable tables (4) and the cambro
+drink dispenser (1) for a date range. Any admin gets the request with Approve/Reject
+buttons; the bot refuses quantities that aren't free for the chosen dates, and approval
+re-checks availability. Items count as out until the owner confirms they are back.
+Borrowers prove a return with `/return` and a photo (also offered as a button in their
+reminders); the owner gets the photo with Confirm returned / Not yet buttons, and the
+photo is kept for the admin WebApp's **Borrowing** tab. Admins can send `/borrowed` for
+where every item is right now. Borrowers are reminded the day before and on the return
+date, then daily when overdue (production only, after `COLLECTION_REMINDER_HOUR`), and
+admins get an overdue digest. The inventory totals live in
+`api/services/borrowing.py:ITEM_TOTALS`.
+
 ## Calendar
 
 Events live entirely in our own Postgres table (`calendar_events`) — created, listed,

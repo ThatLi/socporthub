@@ -7,7 +7,8 @@ from api.database import SessionLocal
 from api.models import DisposableRequest, DisposableStatus, Proposal, ProposalStatus, Reminder, ReminderTargetType, User, UserRole
 from api.portfolio import admin_committee_filter, committee_portfolio
 from api.services.disposables import decide_disposable
-from api.services.telegram import send_message, webapp_open_markup
+from api.services.telegram import answer_callback_query, send_message, webapp_open_markup
+from bot import borrowing
 from bot.conversations import (
     cancel_conversation,
     handle_callback,
@@ -23,6 +24,9 @@ HELP_TEXT = (
     "/start — Open the app\n"
     "/register — Register for an account\n"
     "/disposable — Request hall disposables\n"
+    "/borrow — Borrow foldable tables or the cambro\n"
+    "/return — Send a photo to prove borrowed items are returned\n"
+    "/borrowed — Admins: where the borrowable items are now\n"
     "/cancel — Cancel the current bot flow\n"
     "/pending — Admins: show pending requests\n"
     "/approve <id> — Admins: approve a disposable request\n"
@@ -38,8 +42,18 @@ HELP_TEXT = (
 async def handle_update(update: dict) -> None:
     callback = update.get("callback_query")
     if callback:
+        data = callback.get("data") or ""
         with SessionLocal() as db:
-            await handle_callback(db, callback)
+            if data.startswith("borrow:"):
+                await borrowing.handle_callback(db, callback)
+            elif data.startswith("admin:borrow:"):
+                if callback.get("id"):
+                    await answer_callback_query(callback["id"])
+                actor_id = callback.get("from", {}).get("id")
+                if actor_id is not None:
+                    await borrowing.handle_admin_callback(db, actor_id, data)
+            else:
+                await handle_callback(db, callback)
         return
 
     message = update.get("message")
@@ -49,6 +63,11 @@ async def handle_update(update: dict) -> None:
     chat_id = message.get("chat", {}).get("id")
     text = (message.get("text") or "").strip()
     if chat_id is None:
+        return
+
+    if message.get("photo") or message.get("document"):
+        with SessionLocal() as db:
+            await borrowing.handle_photo(db, chat_id, message)
         return
 
     command, _, argument = text.partition(" ")
@@ -62,9 +81,18 @@ async def handle_update(update: dict) -> None:
     elif command == "/disposable":
         with SessionLocal() as db:
             await start_disposable(db, chat_id)
+    elif command == "/borrow":
+        with SessionLocal() as db:
+            await borrowing.start_borrow(db, chat_id)
+    elif command == "/return":
+        with SessionLocal() as db:
+            await borrowing.start_return(db, chat_id)
+    elif command == "/borrowed":
+        with SessionLocal() as db:
+            await borrowing.handle_borrowed(db, chat_id)
     elif not command.startswith("/"):
         with SessionLocal() as db:
-            handled = await handle_conversation_message(db, chat_id, text)
+            handled = await borrowing.handle_message(db, chat_id, text) or await handle_conversation_message(db, chat_id, text)
         if not handled:
             await send_message(chat_id, "Use /help to see available commands.")
     elif command == "/start":

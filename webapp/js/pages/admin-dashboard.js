@@ -26,6 +26,7 @@ export async function renderAdminDashboard(root, tab = "proposals") {
     <div class="chip-row" id="section-tabs">
       <div class="chip ${tab === "proposals" ? "active" : ""}" data-tab="proposals">Proposals</div>
       <div class="chip ${tab === "disposables" ? "active" : ""}" data-tab="disposables">Disposables</div>
+      <div class="chip ${tab === "borrowing" ? "active" : ""}" data-tab="borrowing">Borrowing</div>
       <div class="chip ${tab === "users" ? "active" : ""}" data-tab="users">Users</div>
     </div>
     <div id="section-content"><div class="loading">Loading…</div></div>
@@ -40,6 +41,8 @@ export async function renderAdminDashboard(root, tab = "proposals") {
     await renderUsersSection(content);
   } else if (tab === "disposables") {
     await renderDisposablesSection(content);
+  } else if (tab === "borrowing") {
+    await renderBorrowingSection(content);
   } else {
     await renderProposalsSection(content);
   }
@@ -353,4 +356,114 @@ function userRow(user, committees, { pendingActions }) {
       }
     </div>
   `;
+}
+
+
+// --- Borrowing: where the foldable tables and cambro are, plus decisions ---
+
+function fmtDate(iso) {
+  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function borrowItems(r) {
+  const parts = [];
+  if (r.tables) parts.push(`${r.tables} table${r.tables === 1 ? "" : "s"}`);
+  if (r.cambro) parts.push("cambro");
+  return parts.join(" + ");
+}
+
+function borrowCard(r) {
+  const who = escapeHtml(r.requester_name || "Unknown") + (r.requester_telegram_username ? ` (${escapeHtml(r.requester_telegram_username)})` : "");
+  const overdue = r.overdue ? `<span class="borrow-overdue">Overdue</span>` : "";
+  let actions = "";
+  if (r.status === "pending") {
+    actions = `<div class="btn-row borrow-actions">
+      <button class="btn" data-borrow-approve="${r.id}">Approve</button>
+      <button class="btn btn-secondary" data-borrow-reject="${r.id}">Reject</button></div>`;
+  } else if (r.status === "return_submitted") {
+    actions = `<div class="btn-row borrow-actions">
+      <button class="btn" data-borrow-confirm="${r.id}">Confirm returned</button>
+      <button class="btn btn-secondary" data-borrow-notyet="${r.id}">Not yet</button></div>`;
+  }
+  return `
+    <div class="card borrow-card" data-borrow-id="${r.id}">
+      <div class="title">${escapeHtml(r.activity_name)}</div>
+      <div class="borrow-items">${borrowItems(r)}</div>
+      <div class="borrow-meta"><span>${who} · ${escapeHtml(r.committee_name)}</span>${statusBadge(r.status)}</div>
+      <div class="borrow-meta"><span>${fmtDate(r.borrow_date)} → ${fmtDate(r.return_date)}</span>${overdue}</div>
+      ${r.rejection_reason ? `<div class="borrow-meta"><span>Reason: ${escapeHtml(r.rejection_reason)}</span></div>` : ""}
+      ${r.has_proof ? `<img class="borrow-proof" data-proof-id="${r.id}" alt="Return proof" />` : ""}
+      ${actions}
+    </div>`;
+}
+
+async function renderBorrowingSection(content) {
+  const [summary, requests] = await Promise.all([api.get("/api/borrow/summary"), api.get("/api/borrow")]);
+
+  const tiles = summary.items
+    .map((i) => `<div class="summary-card" data-status="${i.out ? "needs_action" : "finished"}">
+        <div class="count">${i.out}/${i.total}</div><div class="label">${escapeHtml(i.label)} out</div></div>`)
+    .join("");
+  const extra = `<div class="summary-card" data-status="in_review"><div class="count">${summary.pending}</div><div class="label">Need a decision</div></div>
+    <div class="summary-card" data-status="submitted"><div class="count">${summary.awaiting_confirmation}</div><div class="label">Awaiting confirm</div></div>`;
+
+  const groups = [
+    ["Needs your decision", requests.filter((r) => r.status === "pending")],
+    ["Return photo to confirm", requests.filter((r) => r.status === "return_submitted")],
+    ["Out or upcoming", requests.filter((r) => r.status === "approved")],
+    ["History", requests.filter((r) => ["returned", "rejected"].includes(r.status)).slice(0, 15)],
+  ].filter(([, rows]) => rows.length);
+
+  content.innerHTML = `
+    <div class="summary-grid">${tiles}${extra}</div>
+    ${
+      groups.length
+        ? groups.map(([title, rows]) => `<h2 class="borrow-group-title">${title}</h2>${rows.map(borrowCard).join("")}`).join("")
+        : `<div class="empty-state"><div class="icon">📦</div><p>No borrow requests yet. Members request with /borrow in the bot.</p></div>`
+    }
+    <div id="borrow-error"></div>`;
+
+  const errorBox = content.querySelector("#borrow-error");
+  const refresh = () => renderBorrowingSection(content);
+  const act = async (fn) => {
+    try {
+      await fn();
+      await refresh();
+    } catch (e) {
+      errorBox.innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
+    }
+  };
+
+  // Load return photos through the authenticated API (an <img src> can't send initData).
+  content.querySelectorAll("[data-proof-id]").forEach(async (img) => {
+    try {
+      const { blob } = await api.getBlob(`/api/borrow/${img.dataset.proofId}/proof`);
+      const url = URL.createObjectURL(blob);
+      img.src = url;
+      img.addEventListener("click", () => window.open(url, "_blank"));
+    } catch {
+      img.remove();
+    }
+  });
+
+  const on = (selector, attr, handler) =>
+    content.querySelectorAll(selector).forEach((el) => el.addEventListener("click", () => handler(Number(el.getAttribute(attr)), el)));
+
+  on("[data-borrow-approve]", "data-borrow-approve", (id) =>
+    act(() => api.post(`/api/borrow/${id}/decision`, { status: "approved" })));
+  on("[data-borrow-confirm]", "data-borrow-confirm", (id) =>
+    act(() => api.post(`/api/borrow/${id}/return`, { confirmed: true })));
+  on("[data-borrow-notyet]", "data-borrow-notyet", (id) =>
+    act(() => api.post(`/api/borrow/${id}/return`, { confirmed: false })));
+  on("[data-borrow-reject]", "data-borrow-reject", (id, button) => {
+    const row = button.closest(".borrow-actions");
+    row.outerHTML = `<div class="borrow-reject-form">
+      <textarea id="reject-reason-${id}" placeholder="Reason (optional)" maxlength="1000"></textarea>
+      <button class="btn" data-confirm-reject="${id}">Confirm rejection</button></div>`;
+    content.querySelector(`[data-confirm-reject="${id}"]`).addEventListener("click", () =>
+      act(() => api.post(`/api/borrow/${id}/decision`, {
+        status: "rejected",
+        reason: content.querySelector(`#reject-reason-${id}`).value.trim() || null,
+      })));
+  });
 }

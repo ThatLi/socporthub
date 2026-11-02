@@ -1,8 +1,10 @@
 from datetime import date, datetime, time
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from api.models import (
+    BorrowStatus,
     DisposableStatus,
     Portfolio,
     ProposalCategory,
@@ -333,3 +335,51 @@ class ReminderOut(BaseModel):
 
 class ReminderUnreadCount(BaseModel):
     count: int
+
+
+# --- Borrowing the shared tables and cambro ---
+
+
+class BorrowRequestOut(BaseModel):
+    id: int
+    committee_id: int
+    committee_name: str
+    requested_by: int
+    requester_name: str | None
+    requester_telegram_username: str | None
+    activity_name: str
+    description: str | None
+    tables: int
+    cambro: int
+    borrow_date: date
+    return_date: date
+    status: BorrowStatus
+    rejection_reason: str | None
+    has_proof: bool
+    overdue: bool
+    return_submitted_at: datetime | None
+    returned_at: datetime | None
+    created_at: datetime
+
+
+class BorrowItemSummary(BaseModel):
+    key: str
+    label: str
+    total: int
+    out: int
+
+
+class BorrowSummaryOut(BaseModel):
+    items: list[BorrowItemSummary]
+    pending: int
+    awaiting_confirmation: int
+    overdue: int
+
+
+class BorrowDecisionRequest(BaseModel):
+    status: Literal["approved", "rejected"]
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class BorrowReturnDecision(BaseModel):
+    confirmed: bool

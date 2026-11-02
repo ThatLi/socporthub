@@ -73,6 +73,52 @@ async def send_photo(
             raise
 
 
+async def send_photo_by_file_id(
+    chat_id: int, file_id: str, caption: str | None = None, reply_markup: dict | None = None
+) -> None:
+    """Forward a photo already on Telegram's servers (fire-and-forget, like send_message)."""
+    settings = get_settings()
+    if not settings.telegram_bot_token:
+        logger.info("No TELEGRAM_BOT_TOKEN configured; skipping photo to %s", chat_id)
+        return
+    payload: dict = {"chat_id": chat_id, "photo": file_id}
+    if caption:
+        payload["caption"] = caption
+        payload["parse_mode"] = "HTML"
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(_api_url("sendPhoto"), json=payload)
+            resp.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception("Failed to send Telegram photo to %s", chat_id)
+
+
+async def download_file(file_id: str, max_bytes: int = 10 * 1024 * 1024) -> bytes | None:
+    """Download a file a user sent to the bot. Returns None on any failure or when the
+    file is too large; callers keep working from the file id alone. Errors are logged
+    by type only because httpx's message includes the URL, which contains the bot token."""
+    settings = get_settings()
+    if not settings.telegram_bot_token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            info = await client.post(_api_url("getFile"), json={"file_id": file_id})
+            info.raise_for_status()
+            file = info.json().get("result") or {}
+            path = file.get("file_path")
+            if not path or int(file.get("file_size") or 0) > max_bytes:
+                return None
+            token = settings.telegram_bot_token
+            resp = await client.get(f"https://api.telegram.org/file/bot{token}/{path}")
+            resp.raise_for_status()
+            return resp.content if len(resp.content) <= max_bytes else None
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Could not download Telegram file %s (%s)", file_id, type(exc).__name__)
+        return None
+
+
 async def answer_callback_query(callback_query_id: str, text: str | None = None) -> None:
     settings = get_settings()
     if not settings.telegram_bot_token:

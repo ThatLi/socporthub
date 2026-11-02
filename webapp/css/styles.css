@@ -399,6 +399,8 @@ a.card:active { transform: scale(0.98); }
 .badge-finished { background: var(--green-bg); color: var(--green-text); }
 .badge-grading { background: var(--amber-bg); color: var(--amber-text); }
 .badge-final { background: var(--purple-bg); color: var(--purple-text); }
+.badge-return_submitted { background: var(--blue-bg); color: var(--blue-text); }
+.badge-returned { background: var(--green-bg); color: var(--green-text); }
 
 /* Post-event grading */
 .grading-card { border-top: 4px solid #7060b9; margin-top: 20px; }
@@ -1102,3 +1104,14 @@ body { background: var(--bg); }
 
 /* Theme toggle: quiet */
 #theme-toggle { border: none; background: var(--surface); box-shadow: var(--shadow-card); }
+
+/* --- Borrowing tab --- */
+.borrow-group-title { margin: 20px 0 10px; }
+.borrow-card .title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+.borrow-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; margin-top: 6px; }
+.borrow-items { font-weight: 600; color: var(--text); }
+.borrow-overdue { color: var(--red-text); font-weight: 700; }
+.borrow-proof { display: block; width: 100%; max-height: 220px; object-fit: cover; border-radius: var(--radius-md); margin-top: 12px; cursor: zoom-in; }
+.borrow-actions { margin-top: 12px; }
+.borrow-reject-form { margin-top: 12px; }
+.borrow-reject-form textarea { width: 100%; min-height: 64px; margin-bottom: 8px; padding: 10px 12px; border: 0; border-radius: var(--radius-md); background: var(--input-bg); color: var(--text); font: inherit; }

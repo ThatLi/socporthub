@@ -347,6 +347,9 @@ async def handle_callback(db: Session, callback: dict) -> None:
     if not conversation:
         await send_message(actor_id, "This action is no longer active. Start again with /register or /disposable.")
         return
+    if conversation.flow not in ("register", "disposable"):
+        await send_message(actor_id, "Finish or cancel your current flow first.", _cancel_markup())
+        return
     prefix = "reg" if conversation.flow == "register" else "disp"
     if not data.startswith(prefix + ":"):
         await send_message(actor_id, "Finish or cancel your current flow first.", _cancel_markup())
