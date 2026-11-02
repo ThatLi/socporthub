@@ -117,3 +117,11 @@ def test_revision_check_reads_alembic_version(pair):
         connection.execute(text("INSERT INTO alembic_version VALUES ('0029')"))
     assert copy_database.revision(source) == "0029"
     assert "0029" in copy_database.SUPPORTED_REVISIONS and "0028" in copy_database.SUPPORTED_REVISIONS
+
+
+def test_unreachable_database_gives_a_readable_message_with_a_railway_hint():
+    unreachable = create_engine("sqlite:////no/such/directory/x.db")
+    with pytest.raises(SystemExit, match="Could not connect to the source database"):
+        copy_database.check_connection(unreachable, "source")
+    assert "DATABASE_PUBLIC_URL" in copy_database.connection_hint("postgres.railway.internal")
+    assert "DATABASE_PUBLIC_URL" not in copy_database.connection_hint("db.example.com")

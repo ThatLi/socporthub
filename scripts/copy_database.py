@@ -25,6 +25,7 @@ os.environ["DATABASE_URL"] = "sqlite://"
 
 from sqlalchemy import create_engine, func, inspect, select, text  # noqa: E402
 from sqlalchemy.engine import Engine, make_url  # noqa: E402
+from sqlalchemy.exc import OperationalError  # noqa: E402
 
 from api import models  # noqa: E402,F401  registers every table on Base.metadata
 from api.database import Base  # noqa: E402
@@ -38,6 +39,24 @@ BATCH_ROWS_WITH_BINARY = 25  # posters and return photos are large
 def describe(engine: Engine) -> str:
     url = engine.url
     return f"{url.get_backend_name()} at {url.host or url.database}" + (f":{url.port}" if url.port else "")
+
+
+def connection_hint(host: str | None) -> str:
+    if host and host.endswith(".internal"):
+        return (
+            f"{host} is a private address that only works inside Railway. "
+            "Use the Postgres service's DATABASE_PUBLIC_URL variable instead of DATABASE_URL."
+        )
+    return "Check the host, port, user and password, and that your network allows the connection."
+
+
+def check_connection(engine: Engine, label: str) -> None:
+    """Fail with one readable line (never the password) instead of a traceback."""
+    try:
+        engine.connect().close()
+    except OperationalError as exc:
+        reason = str(exc.orig).strip().splitlines()[0] if exc.orig else "connection failed"
+        raise SystemExit(f"Could not connect to the {label} database ({describe(engine)}): {reason}\n{connection_hint(engine.url.host)}")
 
 
 def revision(engine: Engine) -> str | None:
@@ -147,6 +166,8 @@ def main() -> None:
     source, dest = create_engine(source_url), create_engine(dest_url)
     print(f"Source:      {describe(source)}")
     print(f"Destination: {describe(dest)}")
+    check_connection(source, "source")
+    check_connection(dest, "destination")
     source_revision, dest_revision = revision(source), revision(dest)
     print(f"Revisions:   source {source_revision}, destination {dest_revision}")
     for name, value in (("source", source_revision), ("destination", dest_revision)):
