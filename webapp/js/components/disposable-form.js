@@ -1,5 +1,11 @@
 import { api } from "../api.js";
 
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value ?? "";
+  return div.innerHTML;
+}
+
 export async function renderDisposableSection(container, user, proposal) {
   const isAdmin = user.role === "admin";
   const isOwner = proposal.submitted_by === user.id;
@@ -9,7 +15,7 @@ export async function renderDisposableSection(container, user, proposal) {
   }
 
   const existing = (await api.get(`/api/disposables?proposal_id=${proposal.id}`))[0] || null;
-  const canEdit = isOwner && !(existing && existing.approved);
+  const canEdit = isOwner && !(existing && existing.status === "approved");
 
   container.innerHTML = `
     <div class="card">
@@ -21,13 +27,15 @@ export async function renderDisposableSection(container, user, proposal) {
                Collection date: ${existing.collection_date}
                ${existing.collection_time ? `<br/>Collection time: ${existing.collection_time}` : ""}
              </p>
-             <span class="badge ${existing.approved ? "badge-approved" : "badge-pending"}">
-               ${existing.approved ? "Approved" : "Pending approval"}
-             </span>`
+             <span class="badge ${existing.status === "approved" ? "badge-approved" : existing.status === "rejected" ? "badge-rejected" : "badge-pending"}">
+               ${existing.status === "approved" ? "Approved" : existing.status === "rejected" ? "Rejected" : "Pending approval"}
+             </span>
+             ${existing.description ? `<p style="white-space:pre-wrap;">${escapeHtml(existing.description)}</p>` : ""}
+             ${existing.rejection_reason ? `<div class="error-banner">Reason: ${escapeHtml(existing.rejection_reason)}</div>` : ""}`
           : `<p>No disposables requested for this proposal yet.</p>`
       }
 
-      ${isAdmin && existing && !existing.approved ? `<button class="btn" id="approve-disposable" style="margin-top:12px">Approve</button>` : ""}
+      ${isAdmin && existing && existing.status === "pending" ? `<button class="btn" id="approve-disposable" style="margin-top:12px">Approve</button>` : ""}
       ${canEdit ? `<button class="btn btn-secondary" id="edit-disposable" style="margin-top:12px">${existing ? "Edit Request" : "Request Disposables"}</button>` : ""}
       <div id="disposable-form-slot"></div>
     </div>
@@ -77,6 +85,10 @@ function renderForm(slot, proposal, existing, onSaved) {
         <label for="d-collection_time">Collection time (optional)</label>
         <input type="time" id="d-collection_time" value="${existing?.collection_time ?? ""}" />
       </div>
+      <div class="field">
+        <label for="d-description">Description (optional)</label>
+        <textarea id="d-description" maxlength="2000">${escapeHtml(existing?.description || "")}</textarea>
+      </div>
       <div id="disposable-error"></div>
       <button type="submit" class="btn">Save Request</button>
     </form>
@@ -94,6 +106,7 @@ function renderForm(slot, proposal, existing, onSaved) {
         spoons: Number(slot.querySelector("#d-spoons").value) || 0,
         collection_date: slot.querySelector("#d-collection_date").value,
         collection_time: slot.querySelector("#d-collection_time").value || null,
+        description: slot.querySelector("#d-description").value.trim() || null,
       });
       onSaved();
     } catch (err) {

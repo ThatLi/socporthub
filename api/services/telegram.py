@@ -73,5 +73,20 @@ async def send_photo(
             raise
 
 
+async def answer_callback_query(callback_query_id: str, text: str | None = None) -> None:
+    settings = get_settings()
+    if not settings.telegram_bot_token:
+        return
+    payload: dict = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(_api_url("answerCallbackQuery"), json=payload)
+            response.raise_for_status()
+    except httpx.HTTPError:
+        logger.exception("Failed to answer Telegram callback query %s", callback_query_id)
+
+
 def webapp_open_markup(url: str, label: str = "Open Social Port Hub") -> dict:
     return {"inline_keyboard": [[{"text": label, "web_app": {"url": url}}]]}
