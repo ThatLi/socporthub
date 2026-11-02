@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { proposalCard } from "../components/proposal-card.js";
+import { ICONS, STATUS_ICON } from "../components/icons.js";
 
 const STATUS_LABELS = {
   draft: "Drafts",
@@ -17,6 +18,11 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+}
+
 export async function renderHome(root, user) {
   root.innerHTML = `<div class="loading">Loading…</div>`;
 
@@ -25,23 +31,22 @@ export async function renderHome(root, user) {
     api.get("/api/proposals"),
   ]);
 
-  const committeeNames = escapeHtml((user.committees || []).map((c) => c.name).join(", ") || "No committee assigned yet");
 
   root.innerHTML = `
     <div class="page-header">
-      <h1>Hi, ${escapeHtml(user.display_name || user.email)}</h1>
-    </div>
-
-    <div class="card" style="padding:10px 16px; display:flex; align-items:center; gap:8px;">
-      <span style="font-size:12px; color:var(--text-muted);">Committee</span>
-      <span style="font-size:13px; font-weight:600;">${committeeNames}</span>
+      <div class="avatar">${escapeHtml((user.display_name || user.email || "?").trim().charAt(0).toUpperCase())}</div>
+      <div class="greeting">
+        <div class="greeting-sub">${greeting()}</div>
+        <h1>${escapeHtml(user.display_name || user.email)}</h1>
+      </div>
     </div>
 
     <div class="summary-grid">
       ${Object.entries(STATUS_LABELS)
         .map(
           ([key, label]) => `
-        <div class="summary-card">
+        <div class="summary-card" data-status="${key}">
+          <span class="icon-bubble">${ICONS[STATUS_ICON[key]]}</span>
           <div class="count">${summary[key] ?? 0}</div>
           <div class="label">${label}</div>
         </div>`
@@ -50,7 +55,7 @@ export async function renderHome(root, user) {
     </div>
 
     ${proposals.some((p) => p.status === "grading" && p.submitted_by === user.id) ? `<div class="grading-deadline"><strong>Self-assessments need your attention</strong><span>Open a proposal marked Grading to see its deadline, save scores, and submit.</span></div>` : ""}
-    <h2>Recent proposals</h2>
+    <div class="section-head"><h2>Recent proposals</h2><span class="section-sub">${escapeHtml((user.committees || []).map((c) => c.name).join(", "))}</span></div>
     <div id="proposal-list">
       ${
         proposals.length

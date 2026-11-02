@@ -13,3 +13,6 @@ requirements-dev.txt
 .vscode/
 .pytest_cache/
 .DS_Store
+
+# Local UI design spec (not committed).
+UI-DESIGN-SPEC.md

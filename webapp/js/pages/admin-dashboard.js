@@ -1,3 +1,4 @@
+import { ICONS, STATUS_ICON } from "../components/icons.js";
 import { api } from "../api.js";
 import { statusBadge } from "../components/status-badge.js";
 import { proposalCard } from "../components/proposal-card.js";
@@ -153,7 +154,7 @@ async function renderProposalsSection(content, committeeId = null, statusFilter 
 
     <div class="summary-grid">
       ${Object.entries(STATUS_LABELS)
-        .map(([key, label]) => `<div class="summary-card"><div class="count">${summary[key] ?? 0}</div><div class="label">${label}</div></div>`)
+        .map(([key, label]) => `<div class="summary-card" data-status="${key}"><span class="icon-bubble">${ICONS[STATUS_ICON[key]]}</span><div class="count">${summary[key] ?? 0}</div><div class="label">${label}</div></div>`)
         .join("")}
     </div>
 
