@@ -71,6 +71,11 @@ Don't reintroduce a Google Calendar dependency without checking this decision fi
 
 ## Conventions
 
+- Every migration that creates a table must also `ENABLE ROW LEVEL SECURITY` on it
+  (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, Postgres only). Supabase exposes the
+  `public` schema over its REST API, and the app connects as the owner, which bypasses
+  RLS, so enabling it with no policies closes that door at no cost (migration `0029`
+  did this for the existing tables).
 - All DB access goes through `api/models.py` SQLAlchemy models + a request-scoped session
   (`api/database.py:get_db`). No raw SQL in route handlers.
 - Auth: every WebApp API request must pass Telegram `initData` for HMAC validation

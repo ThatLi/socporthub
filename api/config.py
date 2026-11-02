@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = ""
 
     database_url: str = "sqlite:///./dev.db"
+    # Optional separate URL for Alembic only. On Supabase, DATABASE_URL is the transaction
+    # pooler (port 6543) and this is the session pooler or direct URL (port 5432), because
+    # migrations need session features the transaction pooler does not provide.
+    database_url_direct: str = ""
 
     admin_telegram_ids: str = ""
     social_admin_telegram_ids: str = ""
@@ -53,6 +57,10 @@ class Settings(BaseSettings):
     # a separate relay bot that posts into the announcement channel, not our own
     # bot. 0 means announcing is disabled.
     announcement_telegram_id: int = 0
+
+    @property
+    def migration_database_url(self) -> str:
+        return self.database_url_direct or self.database_url
 
     @property
     def admin_telegram_id_set(self) -> set[int]:

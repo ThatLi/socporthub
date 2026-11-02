@@ -170,6 +170,14 @@ on that URL — this keeps the feed from being trivially guessable by outsiders,
 to how Google Calendar's own "secret address in iCal format" works. Leave it blank to
 serve the feed with no token (fine for local dev).
 
+## Database on Supabase
+
+Set `DATABASE_URL` to Supabase's **transaction pooler** (port 6543); the app then uses no
+connection pool of its own. Set `DATABASE_URL_DIRECT` to the **session pooler** (port 5432,
+same host and user) so `alembic upgrade head` uses it instead. Add `?sslmode=require` to
+both. Migration `0029` enables row-level security on every table; turn the Data API off in
+the Supabase dashboard as well, and enable RLS in any migration that adds a table.
+
 ## Deployment (Railway)
 
 1. New Railway project → add a PostgreSQL plugin → copy its `DATABASE_URL`.
