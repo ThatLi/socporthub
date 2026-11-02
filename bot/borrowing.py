@@ -15,11 +15,13 @@ from sqlalchemy.orm import Session
 
 from api.models import BorrowRequest, BorrowStatus, BotConversation, Committee, User, UserRole, UserStatus
 from api.services.borrowing import (
+    ACTIVE_STATUSES,
     ITEM_TOTALS,
     app_today,
     availability,
     decide_borrow,
     decide_return,
+    delete_borrow,
     describe_items,
     is_overdue,
     out_now,
@@ -29,9 +31,11 @@ from api.services.borrowing import (
 from api.services.telegram import answer_callback_query, download_file, send_message
 from bot.conversations import _cancel_markup, _conversation, _payload, _save, _send_committee_picker
 from bot.notifications import (
+    notify_admins_borrow_deleted,
     notify_admins_new_borrow_request,
     notify_admins_return_proof,
     notify_user_borrow_approved,
+    notify_user_borrow_deleted,
     notify_user_borrow_rejected,
     notify_user_return_confirmed,
     notify_user_return_not_confirmed,
@@ -266,6 +270,12 @@ async def handle_message(db: Session, telegram_id: int, text: str) -> bool:
             return True
         await _finish_rejection(db, conversation, value or None)
         return True
+    if conversation.flow == "borrow_delete":
+        if len(value) > 1000:
+            await send_message(telegram_id, "The reason must be 1,000 characters or fewer.", _cancel_markup())
+            return True
+        await _finish_delete(db, conversation, value or None)
+        return True
     if conversation.flow == "return":
         await send_message(telegram_id, "Please send a <b>photo</b> as proof of the return, or /cancel.", _cancel_markup())
         return True
@@ -467,7 +477,7 @@ async def handle_photo(db: Session, telegram_id: int, message: dict) -> None:
 
 
 async def handle_admin_callback(db: Session, telegram_id: int, callback_data: str) -> None:
-    """admin:borrow:<approve|reject|confirm|notyet|skip>:<request id>"""
+    """admin:borrow:<approve|reject|confirm|notyet|skip|delete|delnoreason>:<request id>"""
     parts = callback_data.split(":")
     if len(parts) != 4 or not parts[3].isdigit():
         return
@@ -496,6 +506,16 @@ async def handle_admin_callback(db: Session, telegram_id: int, callback_data: st
                 [{"text": "Cancel", "callback_data": "conv:cancel"}],
             ]},
         )
+        return
+    if action == "delete":
+        await start_delete(db, telegram_id, request_id)
+        return
+    if action == "delnoreason":
+        conversation = _conversation(db, telegram_id)
+        if conversation and conversation.flow == "borrow_delete" and _payload(conversation).get("target_id") == request_id:
+            await _finish_delete(db, conversation, None)
+        else:
+            await send_message(telegram_id, "That button is no longer active.")
         return
     try:
         if action == "approve":
@@ -536,6 +556,64 @@ async def _finish_rejection(db: Session, conversation: BotConversation, reason: 
     await send_message(admin.telegram_id, f"Borrow request #{request_id} is rejected.")
 
 
+async def start_delete(db: Session, telegram_id: int, request_id: int) -> None:
+    """Ask the admin to confirm a deletion; any text they send becomes the optional reason."""
+    admin = _user(db, telegram_id)
+    if not _is_admin(admin):
+        await send_message(telegram_id, ADMIN_ONLY)
+        return
+    if _conversation(db, telegram_id):
+        await send_message(telegram_id, "Finish or cancel your current flow first.", _cancel_markup())
+        return
+    request = db.get(BorrowRequest, request_id)
+    if not request:
+        await send_message(telegram_id, f"Borrow request #{request_id} was not found.")
+        return
+    db.add(BotConversation(telegram_id=telegram_id, flow="borrow_delete", step="reason", payload=json.dumps({"target_id": request_id})))
+    db.commit()
+    notice = "The borrower will be told." if request.status in ACTIVE_STATUSES else "The borrower will not be messaged."
+    await send_message(
+        telegram_id,
+        f"🗑 Delete request <b>#{request.id}</b> ({escape(describe_items(request))} — {escape(request.activity_name)}, "
+        f"{request.status.value.replace('_', ' ')})? Its reminders will stop. {notice}\n\n"
+        "Type a reason to send with the cancellation, or delete without one.",
+        {"inline_keyboard": [
+            [{"text": "Delete without reason", "callback_data": f"admin:borrow:delnoreason:{request_id}"}],
+            [{"text": "Cancel", "callback_data": "conv:cancel"}],
+        ]},
+    )
+
+
+async def _finish_delete(db: Session, conversation: BotConversation, reason: str | None) -> None:
+    admin = _user(db, conversation.telegram_id)
+    request_id = _payload(conversation).get("target_id")
+    db.delete(conversation)
+    db.commit()
+    if not _is_admin(admin):
+        return
+    try:
+        snapshot = delete_borrow(db, admin, request_id)
+    except HTTPException as exc:
+        await send_message(admin.telegram_id, str(exc.detail))
+        return
+    await announce_deletion(admin, snapshot, reason)
+    await send_message(admin.telegram_id, f"Borrow request #{request_id} deleted. Its reminders are stopped.")
+
+
+async def announce_deletion(admin: User, snapshot: dict, reason: str | None) -> None:
+    """Tell the borrower (only if they were still expecting to borrow or return) and the
+    other admins. Deleting old returned/rejected history stays quiet for the borrower."""
+    reason = reason.strip() if reason and reason.strip() else None
+    if snapshot["active"]:
+        await notify_user_borrow_deleted(
+            snapshot["borrower_telegram_id"], snapshot["id"], snapshot["activity"], snapshot["items"],
+            snapshot["status"].value, reason,
+        )
+    await notify_admins_borrow_deleted(
+        admin.display_name or admin.email, snapshot, reason, exclude_telegram_id=admin.telegram_id
+    )
+
+
 async def handle_borrowed(db: Session, telegram_id: int) -> None:
     """/borrowed - where every item is right now (admins only)."""
     if not _is_admin(_user(db, telegram_id)):
@@ -574,4 +652,7 @@ async def handle_borrowed(db: Session, telegram_id: int) -> None:
         lines.append(f"Waiting for your decision: {pending}")
     if not out and not pending and not upcoming:
         lines.append("\nEverything is in store.")
-    await send_message(telegram_id, "\n".join(lines))
+    markup = None
+    if out:
+        markup = {"inline_keyboard": [[{"text": f"🗑 Delete #{r.id}", "callback_data": f"admin:borrow:delete:{r.id}"}] for r in out]}
+    await send_message(telegram_id, "\n".join(lines), markup)

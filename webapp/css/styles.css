@@ -1115,3 +1115,5 @@ body { background: var(--bg); }
 .borrow-actions { margin-top: 12px; }
 .borrow-reject-form { margin-top: 12px; }
 .borrow-reject-form textarea { width: 100%; min-height: 64px; margin-bottom: 8px; padding: 10px 12px; border: 0; border-radius: var(--radius-md); background: var(--input-bg); color: var(--text); font: inherit; }
+.borrow-delete-row { margin-top: 10px; }
+.borrow-delete { width: auto; padding: 8px 14px; font-size: 13px; }

@@ -1,6 +1,7 @@
 """Rules for borrowing the shared tables and cambro: availability, decisions, return proof,
 and the scheduled reminders. Used by both the Telegram flows and the web API."""
 
+import json
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -8,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from api.config import get_settings
-from api.models import BorrowRequest, BorrowStatus, User, UserRole, UserStatus
+from api.models import BorrowRequest, BorrowStatus, BotConversation, User, UserRole, UserStatus
 
 # The physical inventory the owner is responsible for.
 ITEM_TOTALS: dict[str, int] = {"tables": 4, "cambro": 1}
@@ -155,6 +156,42 @@ def decide_return(db: Session, admin: User, request_id: int, confirmed: bool) ->
     db.commit()
     db.refresh(request)
     return request, True
+
+
+# Statuses where deleting matters to the borrower: they still expected to borrow or return.
+ACTIVE_STATUSES = (BorrowStatus.pending, BorrowStatus.approved, BorrowStatus.return_submitted)
+_REQUEST_FLOWS = ("return", "borrow_reject", "borrow_delete")
+
+
+def delete_borrow(db: Session, admin: User, request_id: int) -> dict:
+    """Permanently delete a request. Scheduled reminders only ever read approved rows, so
+    deleting the row stops them. Open bot conversations about it (a borrower about to send
+    a photo, an admin typing a rejection reason) are removed too so they can't dangle.
+
+    Returns a snapshot of what was deleted for the notifications."""
+    _require_admin(admin)
+    request = _locked(db, request_id)
+    snapshot = {
+        "id": request.id,
+        "activity": request.activity_name,
+        "items": describe_items(request),
+        "status": request.status,
+        "active": request.status in ACTIVE_STATUSES,
+        "borrower": request.requester.display_name or request.requester.email,
+        "borrower_telegram_id": request.requester.telegram_id,
+        "borrow_date": request.borrow_date.isoformat(),
+        "return_date": request.return_date.isoformat(),
+    }
+    for conversation in db.query(BotConversation).filter(BotConversation.flow.in_(_REQUEST_FLOWS)).all():
+        try:
+            payload = json.loads(conversation.payload)
+        except json.JSONDecodeError:
+            continue
+        if request_id in (payload.get("request_id"), payload.get("target_id")):
+            db.delete(conversation)
+    db.delete(request)
+    db.commit()
+    return snapshot
 
 
 def out_now(db: Session, today: date | None = None) -> list[BorrowRequest]:

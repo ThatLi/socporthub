@@ -394,6 +394,7 @@ function borrowCard(r) {
       ${r.rejection_reason ? `<div class="borrow-meta"><span>Reason: ${escapeHtml(r.rejection_reason)}</span></div>` : ""}
       ${r.has_proof ? `<img class="borrow-proof" data-proof-id="${r.id}" alt="Return proof" />` : ""}
       ${actions}
+      <div class="borrow-delete-row"><button class="btn btn-secondary borrow-delete" data-borrow-delete="${r.id}">Delete</button></div>
     </div>`;
 }
 
@@ -455,6 +456,17 @@ async function renderBorrowingSection(content) {
     act(() => api.post(`/api/borrow/${id}/return`, { confirmed: true })));
   on("[data-borrow-notyet]", "data-borrow-notyet", (id) =>
     act(() => api.post(`/api/borrow/${id}/return`, { confirmed: false })));
+  on("[data-borrow-delete]", "data-borrow-delete", (id, button) => {
+    const row = button.closest(".borrow-delete-row");
+    row.innerHTML = `<div class="borrow-reject-form">
+      <p class="field-hint">Deleting stops this request's reminders and tells the borrower. Add an optional reason for them:</p>
+      <textarea id="delete-reason-${id}" placeholder="Reason (optional)" maxlength="1000"></textarea>
+      <button class="btn" data-confirm-delete="${id}">Confirm delete</button></div>`;
+    content.querySelector(`[data-confirm-delete="${id}"]`).addEventListener("click", () =>
+      act(() => api.post(`/api/borrow/${id}/delete`, {
+        reason: content.querySelector(`#delete-reason-${id}`).value.trim() || null,
+      })));
+  });
   on("[data-borrow-reject]", "data-borrow-reject", (id, button) => {
     const row = button.closest(".borrow-actions");
     row.outerHTML = `<div class="borrow-reject-form">

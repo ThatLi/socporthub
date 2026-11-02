@@ -47,6 +47,7 @@ def db(monkeypatch):
         "notify_admins_new_borrow_request", "notify_admins_return_proof",
         "notify_user_borrow_approved", "notify_user_borrow_rejected",
         "notify_user_return_confirmed", "notify_user_return_not_confirmed",
+        "notify_user_borrow_deleted", "notify_admins_borrow_deleted",
     ):
         mock = AsyncMock()
         monkeypatch.setattr(flow, name, mock)
@@ -316,6 +317,77 @@ def test_help_lists_borrow_commands():
     assert "/borrow" in handlers.HELP_TEXT and "/return" in handlers.HELP_TEXT and "/borrowed" in handlers.HELP_TEXT
 
 
+# --- deleting ---------------------------------------------------------------
+
+
+def test_admin_deletes_approved_request_with_reason(db, monkeypatch):
+    request = approved_request(db)
+    request_id = request.id
+    run(flow.handle_admin_callback(db, 999, f"admin:borrow:delete:{request_id}"))
+    assert db.query(BotConversation).one().flow == "borrow_delete"
+    run(flow.handle_message(db, 999, "Event cancelled"))
+    assert db.query(BorrowRequest).count() == 0
+    assert db.query(BotConversation).count() == 0
+    user_notice = db.sent["notify_user_borrow_deleted"]
+    user_notice.assert_awaited_once()
+    assert user_notice.await_args.args[0] == 1001 and user_notice.await_args.args[-1] == "Event cancelled"
+    admin_notice = db.sent["notify_admins_borrow_deleted"]
+    admin_notice.assert_awaited_once()
+    assert admin_notice.await_args.kwargs["exclude_telegram_id"] == 999
+    # the reminder loop has nothing left to remind about
+    reminders = AsyncMock()
+    import bot.notifications as notifications
+    monkeypatch.setattr(notifications, "notify_user_borrow_reminder", reminders)
+    run(borrowing.process_borrow_reminders(db, app_today() + timedelta(days=4)))
+    reminders.assert_not_awaited()
+
+
+def test_delete_without_reason_button(db):
+    approved_request(db)
+    request = db.query(BorrowRequest).one()
+    run(flow.handle_admin_callback(db, 999, f"admin:borrow:delete:{request.id}"))
+    run(flow.handle_admin_callback(db, 999, f"admin:borrow:delnoreason:{request.id}"))
+    assert db.query(BorrowRequest).count() == 0
+    assert db.sent["notify_user_borrow_deleted"].await_args.args[-1] is None
+
+
+def test_deleting_returned_history_does_not_message_the_borrower(db):
+    user = add_user(db)
+    old = add_request(db, user, status=BorrowStatus.returned, start=-9, end=-7)
+    run(flow.start_delete(db, 999, old.id))
+    run(flow.handle_admin_callback(db, 999, f"admin:borrow:delnoreason:{old.id}"))
+    assert db.query(BorrowRequest).count() == 0
+    db.sent["notify_user_borrow_deleted"].assert_not_awaited()
+    db.sent["notify_admins_borrow_deleted"].assert_awaited_once()
+
+
+def test_delete_clears_the_borrowers_open_return_flow_and_stale_buttons(db):
+    request = approved_request(db)
+    request_id = request.id
+    run(flow.start_return(db, 1001))
+    assert db.query(BotConversation).filter_by(flow="return").count() == 1
+    admin = db.query(User).filter_by(telegram_id=999).one()
+    borrowing.delete_borrow(db, admin, request_id)
+    assert db.query(BotConversation).count() == 0
+    run(flow.handle_admin_callback(db, 999, f"admin:borrow:approve:{request_id}"))
+    assert "not found" in db.sent["send_message"].await_args.args[1]
+
+
+def test_non_admin_cannot_delete(db):
+    request = approved_request(db)
+    run(flow.start_delete(db, 1001, request.id))
+    run(flow.handle_admin_callback(db, 1001, f"admin:borrow:delete:{request.id}"))
+    assert db.query(BorrowRequest).count() == 1 and db.query(BotConversation).count() == 0
+
+
+def test_cancel_aborts_the_delete(db):
+    request = approved_request(db)
+    run(flow.start_delete(db, 999, request.id))
+    from bot.conversations import cancel_conversation
+    run(cancel_conversation(db, 999))
+    assert db.query(BorrowRequest).count() == 1
+
+
 # --- admin API --------------------------------------------------------------
 
 
@@ -351,3 +423,28 @@ def test_borrow_api_is_admin_only_and_serves_proof(client):
     assert client.get(f"/api/borrow/{request_id}/proof", headers=auth_header(1001)).status_code == 403
     done = client.post(f"/api/borrow/{request_id}/return", json={"confirmed": True}, headers=auth_header(999))
     assert done.status_code == 200 and done.json()["status"] == "returned"
+
+
+def test_borrow_api_delete_stops_the_request(client):
+    from api.main import app
+    from api.database import get_db
+    from tests.conftest import auth_header
+
+    db = next(app.dependency_overrides[get_db]())
+    db.add(User(telegram_id=999, email="owner@example.com", display_name="Owner", role=UserRole.admin, status=UserStatus.approved))
+    member = User(telegram_id=1001, email="m@example.com", display_name="Member", role=UserRole.user, status=UserStatus.approved)
+    db.add(member)
+    db.flush()
+    request = BorrowRequest(
+        committee_id=db.query(Committee).first().id, requested_by=member.id, activity_name="Quiz", tables=1,
+        borrow_date=app_today(), return_date=app_today() + timedelta(days=1), status=BorrowStatus.approved,
+    )
+    db.add(request)
+    db.commit()
+    request_id = request.id
+    db.close()
+
+    assert client.post(f"/api/borrow/{request_id}/delete", json={"reason": "x"}, headers=auth_header(1001)).status_code == 403
+    assert client.post(f"/api/borrow/{request_id}/delete", json={"reason": "Wrong dates"}, headers=auth_header(999)).status_code == 204
+    assert client.get("/api/borrow", headers=auth_header(999)).json() == []
+    assert client.post(f"/api/borrow/{request_id}/delete", json={}, headers=auth_header(999)).status_code == 404

@@ -145,7 +145,10 @@ reminders); the owner gets the photo with Confirm returned / Not yet buttons, an
 photo is kept for the admin WebApp's **Borrowing** tab. Admins can send `/borrowed` for
 where every item is right now. Borrowers are reminded the day before and on the return
 date, then daily when overdue (production only, after `COLLECTION_REMINDER_HOUR`), and
-admins get an overdue digest. The inventory totals live in
+admins get an overdue digest. Admins can delete any request (`/deleteborrow <id>`, the
+Delete buttons under `/borrowed`, or the Borrowing tab) with an optional reason: it removes
+the row so its reminders stop, tells the borrower (unless it was already returned/rejected
+history), and tells the other admins. The inventory totals live in
 `api/services/borrowing.py:ITEM_TOTALS`.
 
 ## Calendar

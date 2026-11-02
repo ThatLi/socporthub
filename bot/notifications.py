@@ -342,3 +342,36 @@ async def notify_admins_overdue_borrows(items: list[dict]) -> None:
         )
     for admin_id in _admin_ids():
         await send_message(admin_id, "\n".join(lines))
+
+
+async def notify_user_borrow_deleted(
+    telegram_id: int, request_id: int, activity: str, items: str, status: str, reason: str | None = None
+) -> None:
+    if status == "pending":
+        headline = f"🗑 Your borrow request #{request_id} for <b>{escape(activity)}</b> ({escape(items)}) was cancelled by the owner."
+        follow_up = "No items were reserved for you."
+    else:
+        headline = f"🗑 Your borrow #{request_id} for <b>{escape(activity)}</b> ({escape(items)}) was cancelled by the owner."
+        follow_up = (
+            "You will not get any more return reminders. If you already have the items, "
+            "please contact the owner about returning them."
+        )
+    text = headline + ("\n\nReason: " + escape(reason) if reason else "") + "\n\n" + follow_up
+    await send_message(telegram_id, text)
+
+
+async def notify_admins_borrow_deleted(
+    deleted_by: str, snapshot: dict, reason: str | None, exclude_telegram_id: int | None = None
+) -> None:
+    text = (
+        f"🗑 <b>Borrow request #{snapshot['id']} deleted</b> by {escape(deleted_by)}\n\n"
+        f"Activity: {escape(snapshot['activity'])}\n"
+        f"Items: {escape(snapshot['items'])}\n"
+        f"Borrower: {escape(snapshot['borrower'])}\n"
+        f"Was: {escape(str(getattr(snapshot['status'], 'value', snapshot['status'])).replace('_', ' '))}"
+        + (f"\nReason: {escape(reason)}" if reason else "")
+        + "\n\nIts reminders have been stopped."
+    )
+    for admin_id in _admin_ids():
+        if admin_id != exclude_telegram_id:
+            await send_message(admin_id, text)

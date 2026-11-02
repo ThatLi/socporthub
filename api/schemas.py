@@ -383,3 +383,7 @@ class BorrowDecisionRequest(BaseModel):
 
 class BorrowReturnDecision(BaseModel):
     confirmed: bool
+
+
+class BorrowDeleteRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=1000)

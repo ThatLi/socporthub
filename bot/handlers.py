@@ -27,6 +27,7 @@ HELP_TEXT = (
     "/borrow — Borrow foldable tables or the cambro\n"
     "/return — Send a photo to prove borrowed items are returned\n"
     "/borrowed — Admins: where the borrowable items are now\n"
+    "/deleteborrow <id> — Admins: delete a borrow request\n"
     "/cancel — Cancel the current bot flow\n"
     "/pending — Admins: show pending requests\n"
     "/approve <id> — Admins: approve a disposable request\n"
@@ -87,6 +88,12 @@ async def handle_update(update: dict) -> None:
     elif command == "/return":
         with SessionLocal() as db:
             await borrowing.start_return(db, chat_id)
+    elif command == "/deleteborrow":
+        with SessionLocal() as db:
+            if argument.strip().isdigit():
+                await borrowing.start_delete(db, chat_id, int(argument.strip()))
+            else:
+                await send_message(chat_id, "Usage: /deleteborrow 12 (the request number from /borrowed)")
     elif command == "/borrowed":
         with SessionLocal() as db:
             await borrowing.handle_borrowed(db, chat_id)

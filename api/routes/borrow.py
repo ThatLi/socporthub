@@ -7,12 +7,14 @@ from api.auth import get_current_admin
 from api.database import get_db
 from api.models import BorrowRequest, BorrowStatus, User
 from api.schemas import (
+    BorrowDeleteRequest,
     BorrowDecisionRequest,
     BorrowRequestOut,
     BorrowReturnDecision,
     BorrowSummaryOut,
 )
 from api.services import borrowing
+from bot.borrowing import announce_deletion
 from bot.notifications import (
     notify_user_borrow_approved,
     notify_user_borrow_rejected,
@@ -101,6 +103,18 @@ async def decide_return(
         else:
             await notify_user_return_not_confirmed(telegram_id, request.id, request.activity_name)
     return _to_out(request)
+
+
+@router.post("/{request_id}/delete", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_request(
+    request_id: int,
+    body: BorrowDeleteRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
+    snapshot = borrowing.delete_borrow(db, admin, request_id)
+    await announce_deletion(admin, snapshot, body.reason)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{request_id}/proof")
