@@ -52,7 +52,7 @@ def pair():
     db.add(first)
     db.flush()
     db.add(ProposalComment(proposal_id=proposal.id, author_id=user.id, body="reply", reply_to_comment_id=first.id))
-    db.add(BorrowRequest(
+    db.add(BorrowRequest(requester_cca="Test CCA", 
         committee_id=block.id, requested_by=user.id, activity_name="Quiz", tables=2, cambro=1,
         borrow_date=date(2026, 12, 2), return_date=date(2026, 12, 3), status=BorrowStatus.return_submitted,
         return_proof_file_id="f", return_proof_data=b"photo",

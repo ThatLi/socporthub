@@ -139,12 +139,12 @@ async def notify_user_disposable_rejected(
     await send_message(telegram_id, text)
 
 
-async def notify_admins_registration_request(user: User, committee, portfolio: Portfolio) -> None:
+async def notify_admins_registration_request(user: User) -> None:
+    # No CCA is collected at registration; an admin assigns committees later in the WebApp.
     text = (
         "📝 New registration pending approval\n\n"
         f"Name: <b>{escape(user.display_name or user.email)}</b>\n"
-        f"Email: {escape(user.email)}\n"
-        f"CCA: {escape(committee.name)}"
+        f"Email: {escape(user.email)}"
     )
     markup = {
         "inline_keyboard": [[
@@ -152,7 +152,7 @@ async def notify_admins_registration_request(user: User, committee, portfolio: P
             {"text": "Reject", "callback_data": f"admin:reg:reject:{user.id}"},
         ]]
     }
-    for admin_id in _admin_ids(portfolio):
+    for admin_id in _admin_ids():
         await send_message(admin_id, text, reply_markup=markup)
 
 
@@ -210,38 +210,49 @@ async def send_proposal_announcement(
         await send_message(chat_id, text, raise_on_error=True)
 
 
-async def notify_admins_todays_collections(
-    collections: list[dict], portfolio: Portfolio
-) -> None:
+def _format_todays_collections(collections: list[dict]) -> str | None:
+    """Build the daily digest: collections grouped by CCA text, with a subtotal per group."""
     if not collections:
-        return
+        return None
     quantities = ("plates", "cups", "bowls", "forks", "spoons")
-    grouped: dict[str, list[dict]] = {}
+    # Group ignoring capitalization and extra spaces; show the first spelling seen.
+    groups: dict[str, tuple[str, list[dict]]] = {}
     for collection in collections:
-        grouped.setdefault(collection["committee"], []).append(collection)
+        name = " ".join(collection["cca"].split())
+        groups.setdefault(name.casefold(), (name, []))[1].append(collection)
 
-    lines = [f"🌅 <b>Today's disposable collections — {escape(portfolio.value.title())}</b>"]
+    lines = ["🌅 <b>Today's disposable collections</b>"]
     grand_total = {item: 0 for item in quantities}
-    for committee, committee_collections in sorted(grouped.items()):
-        lines.append(f"\n<b>{escape(committee)}</b>")
-        committee_total = {item: 0 for item in quantities}
-        for collection in sorted(committee_collections, key=lambda item: (item["time"], item["title"])):
+    for _, (name, members) in sorted(groups.items()):
+        lines.append(f"\n<b>{escape(name)}</b>")
+        group_total = {item: 0 for item in quantities}
+        for collection in sorted(members, key=lambda item: (item["time"], item["title"])):
             amounts = []
             for item in quantities:
                 amount = collection[item]
-                committee_total[item] += amount
+                group_total[item] += amount
                 grand_total[item] += amount
                 if amount:
                     amounts.append(f"{amount} {item}")
             detail = ", ".join(amounts) or "no items"
-            lines.append(f"• {escape(collection['time'])} — <b>{escape(collection['title'])}</b>: {detail}")
-        subtotal = ", ".join(f"{committee_total[item]} {item}" for item in quantities if committee_total[item]) or "no items"
-        lines.append(f"<i>Committee total: {subtotal}</i>")
+            lines.append(
+                f"• {escape(collection['time'])} — {escape(collection['requester'])}: "
+                f"<b>{escape(collection['title'])}</b>: {detail}"
+            )
+        subtotal = ", ".join(f"{group_total[item]} {item}" for item in quantities if group_total[item]) or "no items"
+        lines.append(f"<i>Subtotal: {subtotal}</i>")
 
     total = ", ".join(f"{grand_total[item]} {item}" for item in quantities if grand_total[item]) or "no items"
-    lines.append(f"\n<b>Total for {escape(portfolio.value.title())}: {total}</b>")
-    for admin_id in _admin_ids(portfolio):
-        await send_message(admin_id, "\n".join(lines))
+    lines.append(f"\n<b>Total: {total}</b>")
+    return "\n".join(lines)
+
+
+async def notify_admins_todays_collections(collections: list[dict]) -> None:
+    text = _format_todays_collections(collections)
+    if text is None:
+        return
+    for admin_id in _admin_ids():
+        await send_message(admin_id, text)
 
 
 # --- Borrowing the shared tables and cambro ---

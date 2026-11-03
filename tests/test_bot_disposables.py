@@ -88,16 +88,13 @@ def add_approved_user(db, telegram_id=1001, committee_name="Block 2"):
 
 def test_registration_conversation_and_admin_approval(bot_db):
     db = bot_db
-    committee = db.query(Committee).filter_by(name="Block 2").one()
 
     run(conversations.start_registration(db, 1001, "new_user"))
     assert db.get(BotConversation, 1001).step == "name"
     run(conversations.handle_conversation_message(db, 1001, "New User"))
     assert db.get(BotConversation, 1001).step == "email"
     run(conversations.handle_conversation_message(db, 1001, "new@example.com"))
-    assert db.get(BotConversation, 1001).step == "committee"
-    run(conversations.handle_callback(db, callback(1001, f"reg:committee:{committee.id}")))
-    assert db.get(BotConversation, 1001).step == "confirm"
+    assert db.get(BotConversation, 1001).step == "confirm"  # no CCA question any more
 
     run(conversations.handle_callback(db, callback(1001, "reg:edit:name")))
     run(conversations.handle_conversation_message(db, 1001, "Updated Name"))
@@ -108,9 +105,9 @@ def test_registration_conversation_and_admin_approval(bot_db):
     assert user.status == UserStatus.pending
     assert user.display_name == "Updated Name"
     assert user.telegram_username == "@new_user"
-    assert user.committee_ids == {committee.id}
+    assert user.committee_ids == set()  # an admin assigns the committee later in the WebApp
     assert db.get(BotConversation, 1001) is None
-    conversations.notify_admins_registration_request.assert_awaited_once()
+    conversations.notify_admins_registration_request.assert_awaited_once_with(user)
 
     run(conversations.handle_callback(db, callback(999, f"admin:reg:approve:{user.id}")))
     db.refresh(user)
@@ -140,16 +137,19 @@ def test_registration_duplicate_email_and_rejected_user_can_retry(bot_db):
     run(conversations.handle_conversation_message(db, 1001, "used@example.com"))
     assert db.get(BotConversation, 1001).step == "email"
     run(conversations.handle_conversation_message(db, 1001, "fresh@example.com"))
-    assert db.get(BotConversation, 1001).step == "committee"
+    assert db.get(BotConversation, 1001).step == "confirm"
 
 
 def test_disposable_conversation_description_submit_and_approve(bot_db):
     db = bot_db
     user, committee = add_approved_user(db)
     run(conversations.start_disposable(db, user.telegram_id))
-    assert db.get(BotConversation, user.telegram_id).step == "activity_name"
+    assert db.get(BotConversation, user.telegram_id).step == "cca_type"
+    run(conversations.handle_callback(db, callback(user.telegram_id, "disp:cca:cca")))
+    assert db.get(BotConversation, user.telegram_id).step == "cca_text"
 
     values = [
+        "Block 2",  # typed CCA
         "Movie Night",
         "10",  # cups
         "0",   # bowls
@@ -169,7 +169,8 @@ def test_disposable_conversation_description_submit_and_approve(bot_db):
 
     disposable = db.query(DisposableRequest).one()
     assert disposable.proposal_id is None
-    assert disposable.committee_id == committee.id
+    assert disposable.committee_id is None
+    assert disposable.requester_cca == "Block 2"
     assert disposable.activity_name == "Movie Night"
     assert disposable.description == "For residents attending the screening"
     assert disposable.status == DisposableStatus.pending
@@ -187,19 +188,60 @@ def test_disposable_conversation_description_submit_and_approve(bot_db):
     assert conversations.notify_user_disposable_approved.await_count == 1
 
 
-def test_disposable_prompts_for_committee_when_user_has_multiple(bot_db):
+def test_disposable_personal_use_is_stored_as_personal(bot_db):
     db = bot_db
-    user, social = add_approved_user(db)
-    welfare = db.query(Committee).filter_by(name="Welfare Comm").one()
-    db.add(UserCommittee(user_id=user.id, committee_id=welfare.id))
+    user, _ = add_approved_user(db)
+    run(conversations.start_disposable(db, user.telegram_id))
+    run(conversations.handle_callback(db, callback(user.telegram_id, "disp:cca:personal")))
+    saved = db.get(BotConversation, user.telegram_id)
+    assert saved.step == "activity_name"
+    assert json.loads(saved.payload)["requester_cca"] == "personal"
+
+
+def test_disposable_works_for_a_user_with_no_committee(bot_db):
+    db = bot_db
+    user = User(telegram_id=2002, email="solo@example.com", display_name="Solo", telegram_username="@solo",
+                role=UserRole.user, status=UserStatus.approved)
+    db.add(user)
     db.commit()
 
     run(conversations.start_disposable(db, user.telegram_id))
-    assert db.get(BotConversation, user.telegram_id).step == "committee"
-    run(conversations.handle_callback(db, callback(user.telegram_id, f"disp:committee:{social.id}")))
+    assert db.get(BotConversation, user.telegram_id).step == "cca_type"
+    run(conversations.handle_callback(db, callback(user.telegram_id, "disp:cca:personal")))
+    values = ["Birthday", "1", "0", "0", "0", "0", (date.today() + timedelta(days=1)).isoformat(), "12:00", "x"]
+    for value in values:
+        run(conversations.handle_conversation_message(db, user.telegram_id, value))
+    run(conversations.handle_callback(db, callback(user.telegram_id, "disp:submit")))
+
+    disposable = db.query(DisposableRequest).one()
+    assert disposable.committee_id is None and disposable.requester_cca == "personal"
+    # Alerts are not scoped to a portfolio, and any admin can decide the request.
+    args = conversations.notify_admins_new_disposable_request.await_args
+    assert args.args[2] is None and args.kwargs["cca"] == "personal"
+    run(conversations.handle_callback(db, callback(999, f"admin:disp:approve:{disposable.id}")))
+    db.refresh(disposable)
+    assert disposable.status == DisposableStatus.approved
+
+
+def test_typed_cca_is_validated_and_can_be_edited(bot_db):
+    db = bot_db
+    user, _ = add_approved_user(db)
+    run(conversations.start_disposable(db, user.telegram_id))
+    run(conversations.handle_callback(db, callback(user.telegram_id, "disp:cca:cca")))
+    for bad in ("", "x" * 256):
+        run(conversations.handle_conversation_message(db, user.telegram_id, bad))
+        assert db.get(BotConversation, user.telegram_id).step == "cca_text"
+
     saved = db.get(BotConversation, user.telegram_id)
-    assert saved.step == "activity_name"
-    assert json.loads(saved.payload)["committee_id"] == social.id
+    saved.step = "confirm"
+    saved.payload = json.dumps({"requester_cca": "Old", "activity_name": "A"})
+    db.commit()
+    run(conversations.handle_callback(db, callback(user.telegram_id, "disp:edit:cca")))
+    assert db.get(BotConversation, user.telegram_id).step == "cca_type"
+    run(conversations.handle_callback(db, callback(user.telegram_id, "disp:cca:cca")))
+    run(conversations.handle_conversation_message(db, user.telegram_id, "New CCA"))
+    saved = db.get(BotConversation, user.telegram_id)
+    assert saved.step == "confirm" and json.loads(saved.payload)["requester_cca"] == "New CCA"
 
 
 def test_registration_rejection_without_reason_allows_retry(bot_db):
@@ -272,7 +314,7 @@ def test_cancel_removes_every_conversation_state(bot_db, flow, step):
 def test_optional_rejection_reason_and_portfolio_guard(bot_db, monkeypatch):
     db = bot_db
     user, social = add_approved_user(db)
-    request = DisposableRequest(
+    request = DisposableRequest(requester_cca="Test CCA", 
         committee_id=social.id,
         requested_by=user.id,
         activity_name="Supper",
@@ -294,7 +336,7 @@ def test_optional_rejection_reason_and_portfolio_guard(bot_db, monkeypatch):
     )
 
     welfare_user, welfare = add_approved_user(db, telegram_id=1002, committee_name="Welfare Comm")
-    welfare_request = DisposableRequest(
+    welfare_request = DisposableRequest(requester_cca="Test CCA", 
         committee_id=welfare.id,
         requested_by=welfare_user.id,
         activity_name="Care Packs",
@@ -351,3 +393,33 @@ def test_stale_callback_cannot_skip_the_stored_step(bot_db):
     run(conversations.handle_callback(db, callback(telegram_id, "reg:submit")))
     assert db.get(BotConversation, telegram_id).step == "name"
     assert db.query(User).filter_by(telegram_id=telegram_id).first() is None
+
+
+def test_resubmitting_a_registration_keeps_committees_an_admin_assigned(bot_db):
+    db = bot_db
+    committee = db.query(Committee).filter_by(name="Block 2").one()
+    user = User(telegram_id=1001, email="old@example.com", role=UserRole.user, status=UserStatus.rejected)
+    db.add(user)
+    db.flush()
+    db.add(UserCommittee(user_id=user.id, committee_id=committee.id))
+    db.commit()
+
+    run(conversations.start_registration(db, 1001, None))
+    run(conversations.handle_conversation_message(db, 1001, "Again"))
+    run(conversations.handle_conversation_message(db, 1001, "again@example.com"))
+    run(conversations.handle_callback(db, callback(1001, "reg:submit")))
+    db.refresh(user)
+    assert user.status == UserStatus.pending and user.committee_ids == {committee.id}
+
+
+def test_admin_can_reject_a_registration_with_no_committee(bot_db):
+    db = bot_db
+    user = User(telegram_id=3200, email="nocca@example.com", display_name="No CCA", role=UserRole.user,
+                status=UserStatus.pending)
+    db.add(user)
+    db.commit()
+    run(conversations.handle_callback(db, callback(999, f"admin:reg:reject:{user.id}")))
+    run(conversations.handle_callback(db, callback(999, "admin:reject:skip:0")))
+    db.refresh(user)
+    assert user.status == UserStatus.rejected
+    conversations.notify_user_registration_rejected_with_reason.assert_awaited_once_with(3200, None)

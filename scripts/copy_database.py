@@ -31,7 +31,7 @@ from api import models  # noqa: E402,F401  registers every table on Base.metadat
 from api.database import Base  # noqa: E402
 
 # Tables are identical in revisions 0028 and 0029 (0029 only enables row-level security).
-SUPPORTED_REVISIONS = {"0028", "0029"}
+SUPPORTED_REVISIONS = {"0028", "0029", "0030"}
 BATCH_ROWS = 500
 BATCH_ROWS_WITH_BINARY = 25  # posters and return photos are large
 

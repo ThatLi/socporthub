@@ -7,8 +7,7 @@ from zoneinfo import ZoneInfo
 
 from api.config import get_settings
 from api.database import SessionLocal
-from api.models import DisposableRequest, DisposableStatus, Portfolio, Proposal, ProposalStatus
-from api.portfolio import committee_portfolio
+from api.models import DisposableRequest, DisposableStatus, Proposal, ProposalStatus
 from bot.notifications import notify_admins_todays_collections
 
 logger = logging.getLogger(__name__)
@@ -69,9 +68,9 @@ async def collection_reminder_loop() -> None:
                     collections = [
                         {
                             "title": r.activity_name,
-                            "committee": r.committee.name,
+                            "cca": r.requester_cca,
+                            "requester": r.requester.telegram_username or r.requester.display_name or r.requester.email,
                             "time": r.collection_time.strftime("%H:%M") if r.collection_time else "time not set",
-                            "portfolio": committee_portfolio(r.committee),
                             "plates": r.plates,
                             "cups": r.cups,
                             "bowls": r.bowls,
@@ -80,9 +79,7 @@ async def collection_reminder_loop() -> None:
                         }
                         for r in requests
                     ]
-                for portfolio in Portfolio:
-                    portfolio_collections = [item for item in collections if item["portfolio"] == portfolio]
-                    await notify_admins_todays_collections(portfolio_collections, portfolio)
+                await notify_admins_todays_collections(collections)
                 last_notified = now.date()
         except asyncio.CancelledError:
             raise

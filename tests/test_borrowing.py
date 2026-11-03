@@ -1,5 +1,5 @@
 import asyncio
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -70,7 +70,7 @@ def add_user(db, telegram_id=1001, status=UserStatus.approved):
 
 def add_request(db, user, tables=1, cambro=0, start=0, end=2, status=BorrowStatus.approved):
     today = app_today()
-    request = BorrowRequest(
+    request = BorrowRequest(requester_cca="Test CCA", 
         committee_id=db.query(Committee).one().id, requested_by=user.id, activity_name="Movie night",
         tables=tables, cambro=cambro, borrow_date=today + timedelta(days=start),
         return_date=today + timedelta(days=end), status=status,
@@ -84,6 +84,7 @@ def place_request(db, user_id=1001, tables=2, cambro=1, start=1, end=3):
     """Drive the real conversation to submission."""
     today = app_today()
     run(flow.start_borrow(db, user_id))
+    run(flow.handle_callback(db, cb(user_id, "borrow:cca:personal")))
     for text in ("Movie night", (today + timedelta(days=start)).isoformat(), (today + timedelta(days=end)).isoformat()):
         run(flow.handle_message(db, user_id, text))
     run(flow.handle_callback(db, cb(user_id, f"borrow:tables:{tables}")))
@@ -127,6 +128,7 @@ def test_borrow_flow_refuses_more_tables_than_free(db):
     add_request(db, user, tables=3, start=1, end=3)
     today = app_today()
     run(flow.start_borrow(db, 1001))
+    run(flow.handle_callback(db, cb(1001, "borrow:cca:personal")))
     for text in ("Party", (today + timedelta(days=1)).isoformat(), (today + timedelta(days=2)).isoformat()):
         run(flow.handle_message(db, 1001, text))
     run(flow.handle_message(db, 1001, "3"))
@@ -141,6 +143,7 @@ def test_cambro_is_skipped_when_unavailable(db):
     add_request(db, user, tables=0, cambro=1, start=1, end=3)
     today = app_today()
     run(flow.start_borrow(db, 1001))
+    run(flow.handle_callback(db, cb(1001, "borrow:cca:personal")))
     for text in ("Party", (today + timedelta(days=1)).isoformat(), (today + timedelta(days=3)).isoformat()):
         run(flow.handle_message(db, 1001, text))
     run(flow.handle_callback(db, cb(1001, "borrow:tables:1")))
@@ -159,6 +162,7 @@ def test_return_date_cannot_precede_borrow_date(db):
     add_user(db)
     today = app_today()
     run(flow.start_borrow(db, 1001))
+    run(flow.handle_callback(db, cb(1001, "borrow:cca:personal")))
     run(flow.handle_message(db, 1001, "Party"))
     run(flow.handle_message(db, 1001, (today + timedelta(days=5)).isoformat()))
     run(flow.handle_message(db, 1001, (today + timedelta(days=2)).isoformat()))
@@ -402,7 +406,7 @@ def test_borrow_api_is_admin_only_and_serves_proof(client):
     db.add(member)
     db.flush()
     committee = db.query(Committee).first()
-    request = BorrowRequest(
+    request = BorrowRequest(requester_cca="Test CCA", 
         committee_id=committee.id, requested_by=member.id, activity_name="Quiz", tables=2, cambro=1,
         borrow_date=app_today(), return_date=app_today() + timedelta(days=1), status=BorrowStatus.return_submitted,
         return_proof_file_id="f", return_proof_content_type="image/jpeg", return_proof_data=b"\xff\xd8photo",
@@ -435,7 +439,7 @@ def test_borrow_api_delete_stops_the_request(client):
     member = User(telegram_id=1001, email="m@example.com", display_name="Member", role=UserRole.user, status=UserStatus.approved)
     db.add(member)
     db.flush()
-    request = BorrowRequest(
+    request = BorrowRequest(requester_cca="Test CCA", 
         committee_id=db.query(Committee).first().id, requested_by=member.id, activity_name="Quiz", tables=1,
         borrow_date=app_today(), return_date=app_today() + timedelta(days=1), status=BorrowStatus.approved,
     )
@@ -448,3 +452,57 @@ def test_borrow_api_delete_stops_the_request(client):
     assert client.post(f"/api/borrow/{request_id}/delete", json={"reason": "Wrong dates"}, headers=auth_header(999)).status_code == 204
     assert client.get("/api/borrow", headers=auth_header(999)).json() == []
     assert client.post(f"/api/borrow/{request_id}/delete", json={}, headers=auth_header(999)).status_code == 404
+
+
+def test_request_can_be_filed_without_a_committee(db):
+    user = add_user(db)
+    today = date.today()
+    personal = BorrowRequest(
+        committee_id=None, requester_cca="personal", requested_by=user.id, activity_name="Birthday",
+        tables=1, borrow_date=today, return_date=today + timedelta(days=1),
+    )
+    db.add(personal)
+    db.commit()
+    db.refresh(personal)
+    assert personal.committee_id is None and personal.committee is None
+    assert personal.requester_cca == "personal"
+    assert personal.requester.id == user.id
+
+
+def test_borrow_asks_for_cca_first_and_stores_typed_text(db):
+    add_user(db)
+    run(flow.start_borrow(db, 1001))
+    assert db.query(BotConversation).one().step == "cca_type"
+    run(flow.handle_callback(db, cb(1001, "borrow:cca:cca")))
+    assert db.query(BotConversation).one().step == "cca_text"
+    for bad in ("", "x" * 256):
+        run(flow.handle_message(db, 1001, bad))
+        assert db.query(BotConversation).one().step == "cca_text"
+    run(flow.handle_message(db, 1001, "Block 3"))
+    conversation = db.query(BotConversation).one()
+    assert conversation.step == "activity_name" and '"requester_cca": "Block 3"' in conversation.payload
+
+
+def test_borrow_works_for_a_user_without_a_committee_and_stores_personal(db):
+    db.add(User(telegram_id=2002, email="solo@example.com", display_name="Solo", telegram_username="@solo",
+                role=UserRole.user, status=UserStatus.approved))
+    db.commit()
+    place_request(db, user_id=2002)
+    request = db.query(BorrowRequest).one()
+    assert request.committee_id is None and request.requester_cca == "personal"
+    assert db.sent["notify_admins_new_borrow_request"].await_args.args[3] == "personal"
+
+
+def test_borrow_cca_can_be_edited_from_the_confirmation(db):
+    add_user(db)
+    run(flow.start_borrow(db, 1001))
+    run(flow.handle_callback(db, cb(1001, "borrow:cca:personal")))
+    conversation = db.query(BotConversation).one()
+    conversation.step = "confirm"
+    db.commit()
+    run(flow.handle_callback(db, cb(1001, "borrow:edit:cca")))
+    assert db.query(BotConversation).one().step == "cca_type"
+    run(flow.handle_callback(db, cb(1001, "borrow:cca:cca")))
+    run(flow.handle_message(db, 1001, "Quiz Club"))
+    conversation = db.query(BotConversation).one()
+    assert conversation.step == "confirm" and '"requester_cca": "Quiz Club"' in conversation.payload

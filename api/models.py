@@ -262,7 +262,9 @@ class DisposableRequest(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     proposal_id: Mapped[int | None] = mapped_column(ForeignKey("proposals.id"), unique=True)
-    committee_id: Mapped[int] = mapped_column(ForeignKey("committees.id"), nullable=False)
+    committee_id: Mapped[int | None] = mapped_column(ForeignKey("committees.id"))
+    # Free-text CCA the request is filed under, or "personal" for personal use.
+    requester_cca: Mapped[str] = mapped_column(String(255), nullable=False)
     requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     activity_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -280,7 +282,7 @@ class DisposableRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     proposal: Mapped["Proposal | None"] = relationship(back_populates="disposable_request")
-    committee: Mapped["Committee"] = relationship(back_populates="disposable_requests")
+    committee: Mapped["Committee | None"] = relationship(back_populates="disposable_requests")
     requester: Mapped["User"] = relationship()
 
     @property
@@ -295,7 +297,9 @@ class BorrowRequest(Base):
     __tablename__ = "borrow_requests"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    committee_id: Mapped[int] = mapped_column(ForeignKey("committees.id"), nullable=False)
+    committee_id: Mapped[int | None] = mapped_column(ForeignKey("committees.id"))
+    # Free-text CCA the request is filed under, or "personal" for personal use.
+    requester_cca: Mapped[str] = mapped_column(String(255), nullable=False)
     requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     activity_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -321,7 +325,7 @@ class BorrowRequest(Base):
     last_reminded_on: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    committee: Mapped["Committee"] = relationship()
+    committee: Mapped["Committee | None"] = relationship()
     requester: Mapped["User"] = relationship(foreign_keys=[requested_by])
     decider: Mapped["User | None"] = relationship(foreign_keys=[decided_by])
 

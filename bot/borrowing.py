@@ -1,6 +1,6 @@
 """Telegram flows for borrowing the shared foldable tables and cambro.
 
-/borrow   - borrower requests items (committee, activity, dates, items, description)
+/borrow   - borrower requests items (CCA, activity, dates, items, description)
 /return   - borrower sends a photo as proof the items are back
 /borrowed - admins see where every item is right now
 Admins approve / reject requests and confirm returns with inline buttons.
@@ -13,7 +13,7 @@ from html import escape
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from api.models import BorrowRequest, BorrowStatus, BotConversation, Committee, User, UserRole, UserStatus
+from api.models import BorrowRequest, BorrowStatus, BotConversation, User, UserRole, UserStatus
 from api.services.borrowing import (
     ACTIVE_STATUSES,
     ITEM_TOTALS,
@@ -29,7 +29,7 @@ from api.services.borrowing import (
     submit_return_proof,
 )
 from api.services.telegram import answer_callback_query, download_file, send_message
-from bot.conversations import _cancel_markup, _conversation, _payload, _save, _send_committee_picker
+from bot.conversations import MAX_CCA_LENGTH, PERSONAL_CCA, _cancel_markup, _conversation, _payload, _save
 from bot.notifications import (
     notify_admins_borrow_deleted,
     notify_admins_new_borrow_request,
@@ -41,9 +41,9 @@ from bot.notifications import (
     notify_user_return_not_confirmed,
 )
 
-EDITABLE = ("committee", "activity_name", "borrow_date", "return_date", "tables", "cambro", "description")
+EDITABLE = ("cca", "activity_name", "borrow_date", "return_date", "tables", "cambro", "description")
 EDIT_LABELS = {
-    "committee": "CCA",
+    "cca": "CCA",
     "activity_name": "Activity",
     "borrow_date": "Borrow date",
     "return_date": "Return date",
@@ -94,16 +94,7 @@ async def start_borrow(db: Session, telegram_id: int) -> None:
     if not user or user.status != UserStatus.approved:
         await send_message(telegram_id, "You need an approved account before borrowing. Use /register first.")
         return
-    committees = [m.committee for m in user.committee_memberships]
-    if not committees:
-        await send_message(telegram_id, "Your account has no CCA assigned. Ask an administrator to update it.")
-        return
-    data: dict = {}
-    step = "committee"
-    if len(committees) == 1:
-        data["committee_id"] = committees[0].id
-        step = "activity_name"
-    conversation = BotConversation(telegram_id=telegram_id, flow="borrow", step=step, payload=json.dumps(data))
+    conversation = BotConversation(telegram_id=telegram_id, flow="borrow", step="cca_type", payload=json.dumps({}))
     db.add(conversation)
     db.commit()
     await send_message(
@@ -118,9 +109,14 @@ async def _prompt(db: Session, conversation: BotConversation) -> None:
     tid = conversation.telegram_id
     data = _payload(conversation)
     step = conversation.step
-    if step == "committee":
-        user = _user(db, tid)
-        await _send_committee_picker(tid, [m.committee for m in user.committee_memberships] if user else [], "borrow", 0)
+    if step == "cca_type":
+        await send_message(tid, "What CCA are you requesting under?", {"inline_keyboard": [
+            [{"text": "CCA", "callback_data": "borrow:cca:cca"},
+             {"text": "Personal use", "callback_data": "borrow:cca:personal"}],
+            [{"text": "Cancel", "callback_data": "conv:cancel"}],
+        ]})
+    elif step == "cca_text":
+        await send_message(tid, "Type the name of the CCA you are requesting under.", _cancel_markup())
     elif step == "activity_name":
         await send_message(tid, "What is the activity or purpose of this request?", _cancel_markup())
     elif step == "borrow_date":
@@ -178,11 +174,10 @@ async def _advance(db: Session, conversation: BotConversation, data: dict, next_
 
 async def _send_confirmation(db: Session, conversation: BotConversation) -> None:
     data = _payload(conversation)
-    committee = db.get(Committee, data.get("committee_id"))
     items = describe_items({"tables": data.get("tables", 0), "cambro": data.get("cambro", 0)})
     text = (
         "Please confirm your borrow request:\n\n"
-        f"CCA: {escape(committee.name if committee else '')}\n"
+        f"CCA: {escape(data.get('requester_cca', ''))}\n"
         f"Activity: <b>{escape(data.get('activity_name', ''))}</b>\n"
         f"Items: <b>{escape(items)}</b>\n"
         f"Collect: {data.get('borrow_date', '')}\n"
@@ -196,7 +191,14 @@ async def _borrow_message(db: Session, conversation: BotConversation, data: dict
     tid = conversation.telegram_id
     step = conversation.step
     today = app_today()
-    if step == "activity_name":
+    if step == "cca_text":
+        if not value or len(value) > MAX_CCA_LENGTH:
+            await send_message(tid, f"Enter a CCA name between 1 and {MAX_CCA_LENGTH} characters.", _cancel_markup())
+            return
+        data["requester_cca"] = value
+        await send_message(tid, f"Your CCA has been recorded: {escape(value)}.")
+        await _advance(db, conversation, data, "activity_name")
+    elif step == "activity_name":
         if not value or len(value) > 255:
             await send_message(tid, "Enter an activity name between 1 and 255 characters.", _cancel_markup())
             return
@@ -302,17 +304,16 @@ async def handle_callback(db: Session, callback: dict) -> None:
         return
     payload = _payload(conversation)
     step = conversation.step
-    if action == "committee-page" and step == "committee" and len(parts) == 3 and parts[2].isdigit():
-        user = _user(db, actor_id)
-        await _send_committee_picker(actor_id, [m.committee for m in user.committee_memberships] if user else [], "borrow", int(parts[2]))
-    elif action == "committee" and step == "committee" and len(parts) == 3 and parts[2].isdigit():
-        user = _user(db, actor_id)
-        committee = db.get(Committee, int(parts[2]))
-        if not user or not committee or committee.id not in user.committee_ids:
-            await send_message(actor_id, "That CCA is not assigned to your account.")
-            return
-        payload["committee_id"] = committee.id
-        await _advance(db, conversation, payload, "activity_name")
+    if action == "cca" and step == "cca_type" and len(parts) == 3 and parts[2] in ("cca", "personal"):
+        if parts[2] == "cca":
+            conversation.step = "cca_text"
+            _save(conversation, payload)  # keeps the _editing flag for the typed answer
+            db.commit()
+            await _prompt(db, conversation)
+        else:
+            payload["requester_cca"] = PERSONAL_CCA
+            await send_message(actor_id, "Your CCA has been recorded: personal use.")
+            await _advance(db, conversation, payload, "activity_name")
     elif action == "tables" and step == "tables" and len(parts) == 3 and parts[2].isdigit():
         await _set_tables(db, conversation, payload, int(parts[2]))
     elif action == "cambro" and step == "cambro" and len(parts) == 3 and parts[2] in ("0", "1"):
@@ -328,7 +329,7 @@ async def handle_callback(db: Session, callback: dict) -> None:
     elif action == "edit" and step == "confirm" and len(parts) == 3 and parts[2] in EDITABLE:
         field = parts[2]
         payload["_editing"] = True
-        conversation.step = field
+        conversation.step = "cca_type" if field == "cca" else field
         _save(conversation, payload)
         db.commit()
         await _prompt(db, conversation)
@@ -342,9 +343,9 @@ async def _submit(db: Session, conversation: BotConversation) -> None:
     tid = conversation.telegram_id
     data = _payload(conversation)
     user = _user(db, tid)
-    committee = db.get(Committee, data.get("committee_id"))
-    if not user or user.status != UserStatus.approved or not committee or committee.id not in user.committee_ids:
-        await send_message(tid, "Your account or CCA assignment changed. Please cancel and start again.")
+    cca = (data.get("requester_cca") or "").strip()
+    if not user or user.status != UserStatus.approved or not cca:
+        await send_message(tid, "Your account changed or the CCA is missing. Please cancel and start again.")
         return
     tables, cambro = int(data.get("tables", 0)), int(data.get("cambro", 0))
     if tables + cambro == 0:
@@ -359,7 +360,8 @@ async def _submit(db: Session, conversation: BotConversation) -> None:
         await send_message(tid, f"{problem} Edit the items or dates.", _confirm_markup())
         return
     request = BorrowRequest(
-        committee_id=committee.id,
+        committee_id=None,
+        requester_cca=cca,
         requested_by=user.id,
         activity_name=data["activity_name"],
         description=data.get("description"),
@@ -374,7 +376,7 @@ async def _submit(db: Session, conversation: BotConversation) -> None:
     db.commit()
     db.refresh(request)
     await notify_admins_new_borrow_request(
-        request.id, user.display_name or user.email, user.telegram_username, committee.name, request.activity_name,
+        request.id, user.display_name or user.email, user.telegram_username, cca, request.activity_name,
         describe_items(request), borrow_date.isoformat(), return_date.isoformat(), request.description,
     )
     await send_message(tid, f"Borrow request #{request.id} submitted for approval.")
@@ -638,7 +640,7 @@ async def handle_borrowed(db: Session, telegram_id: int) -> None:
             who += f" ({escape(r.requester.telegram_username)})"
         lines.append(
             f"#{r.id} {escape(describe_items(r))} — {escape(r.activity_name)}\n"
-            f"   {who}, {escape(r.committee.name)}; back by {r.return_date.isoformat()}{flag}"
+            f"   {who}, {escape(r.requester_cca)}; back by {r.return_date.isoformat()}{flag}"
         )
     pending = db.query(BorrowRequest).filter(BorrowRequest.status == BorrowStatus.pending).count()
     upcoming = (

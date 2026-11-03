@@ -48,7 +48,9 @@ def category_allowed_for_committee(committee: Committee, category: ProposalCateg
     return category in portfolio_categories(committee_portfolio(committee))
 
 
-def admin_can_access_committee(user: User, committee: Committee) -> bool:
+def admin_can_access_committee(user: User, committee: Committee | None) -> bool:
+    if committee is None:  # a request filed under a free-text CCA has no committee to scope by
+        return True
     return user.role != UserRole.admin or committee_portfolio(committee) == admin_portfolio(user)
 
 

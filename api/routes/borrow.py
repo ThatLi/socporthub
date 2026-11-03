@@ -29,7 +29,7 @@ def _to_out(r: BorrowRequest, today=None) -> BorrowRequestOut:
     return BorrowRequestOut(
         id=r.id,
         committee_id=r.committee_id,
-        committee_name=r.committee.name,
+        committee_name=r.requester_cca,  # field name kept so the frontend is unchanged
         requested_by=r.requested_by,
         requester_name=r.requester.display_name,
         requester_telegram_username=r.requester.telegram_username,

@@ -8,7 +8,7 @@ from api.auth import get_current_user
 from api.config import get_settings
 from api.database import get_db
 from api.models import DisposableRequest, DisposableStatus, User, UserRole
-from api.portfolio import admin_can_access_committee, admin_committee_filter, committee_portfolio
+from api.portfolio import admin_can_access_committee, committee_portfolio
 from api.schemas import (
     DisposableDecisionRequest,
     DisposableRequestOut,
@@ -38,7 +38,7 @@ def _to_out(d: DisposableRequest) -> DisposableRequestOut:
         proposal_title=d.activity_name,
         activity_name=d.activity_name,
         description=d.description,
-        committee_name=d.committee.name,
+        committee_name=d.requester_cca,  # field name kept so the frontend is unchanged
         requested_by=d.requested_by,
         requester_name=d.requester.display_name,
         plates=d.plates,
@@ -67,8 +67,8 @@ def list_disposables(
         query = query.filter(DisposableRequest.proposal_id == proposal_id)
     elif user.role != UserRole.admin:
         query = query.filter(DisposableRequest.requested_by == user.id)
-    else:
-        query = query.join(DisposableRequest.committee).filter(admin_committee_filter(user))
+    # Admins see every request: they are not scoped by portfolio, and a request filed under a
+    # free-text CCA has no committee to join to.
     requests = query.order_by(DisposableRequest.collection_date).all()
     return [_to_out(d) for d in requests]
 
@@ -82,9 +82,7 @@ def todays_collections(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin access required")
     requests = (
         db.query(DisposableRequest)
-        .join(DisposableRequest.committee)
         .filter(DisposableRequest.status == DisposableStatus.approved, DisposableRequest.collection_date == _app_today())
-        .filter(admin_committee_filter(admin))
         .all()
     )
     return [_to_out(d) for d in requests]
@@ -113,10 +111,12 @@ async def upsert_disposable(
     disposable = existing or DisposableRequest(
         proposal_id=proposal_id,
         committee_id=proposal.committee_id,
+        requester_cca=proposal.committee.name,
         requested_by=user.id,
         activity_name=proposal.title,
     )
     disposable.committee_id = proposal.committee_id
+    disposable.requester_cca = proposal.committee.name
     disposable.activity_name = proposal.title
     disposable.description = req.description
     disposable.plates = req.plates

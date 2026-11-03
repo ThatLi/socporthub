@@ -13,15 +13,12 @@ from sqlalchemy.orm import Session
 from api.config import get_settings
 from api.models import (
     BotConversation,
-    Committee,
     DisposableRequest,
     DisposableStatus,
     User,
-    UserCommittee,
     UserRole,
     UserStatus,
 )
-from api.portfolio import admin_can_access_committee, committee_portfolio
 from api.services.disposables import decide_disposable
 from api.services.telegram import answer_callback_query, send_message
 from bot.notifications import (
@@ -33,8 +30,9 @@ from bot.notifications import (
     notify_user_registration_rejected_with_reason,
 )
 
+PERSONAL_CCA = "personal"
+MAX_CCA_LENGTH = 255  # matches requester_cca
 ITEMS = ("cups", "bowls", "spoons", "forks", "plates")
-PAGE_SIZE = 8
 EMAIL = TypeAdapter(EmailStr)
 TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
@@ -115,28 +113,15 @@ async def start_disposable(db: Session, telegram_id: int) -> None:
     if not user or user.status != UserStatus.approved:
         await send_message(telegram_id, "You need an approved account before requesting disposables. Use /register first.")
         return
-    committees = [membership.committee for membership in user.committee_memberships]
-    if not committees:
-        await send_message(telegram_id, "Your account has no CCA assigned. Ask an administrator to update it.")
-        return
-    data: dict = {}
-    if len(committees) == 1:
-        data["committee_id"] = committees[0].id
-        step = "activity_name"
-    else:
-        step = "committee"
     conversation = BotConversation(
         telegram_id=telegram_id,
         flow="disposable",
-        step=step,
-        payload=json.dumps(data),
+        step="cca_type",
+        payload=json.dumps({}),
     )
     db.add(conversation)
     db.commit()
-    if step == "committee":
-        await _send_committee_picker(telegram_id, committees, "disp", 0)
-    else:
-        await send_message(telegram_id, "What is the activity or purpose of this request?", _cancel_markup())
+    await _prompt_disposable_step(telegram_id, "cca_type")
 
 
 async def handle_conversation_message(db: Session, telegram_id: int, text: str) -> bool:
@@ -187,13 +172,10 @@ async def _registration_message(db: Session, conversation: BotConversation, data
             await send_message(conversation.telegram_id, "That email is already registered.", _cancel_markup())
             return
         data["email"] = email
-        conversation.step = "confirm" if editing else "committee"
+        conversation.step = "confirm"
         _save(conversation, data)
         db.commit()
-        if editing:
-            await _send_registration_confirmation(db, conversation)
-        else:
-            await _send_committee_picker(conversation.telegram_id, db.query(Committee).order_by(Committee.name).all(), "reg", 0)
+        await _send_registration_confirmation(db, conversation)
         return
     await send_message(conversation.telegram_id, "Use the buttons shown for this step, or /cancel.", _cancel_markup())
 
@@ -201,6 +183,24 @@ async def _registration_message(db: Session, conversation: BotConversation, data
 async def _disposable_message(db: Session, conversation: BotConversation, data: dict, value: str) -> None:
     step = conversation.step
     editing = bool(data.pop("_editing", False))
+    if step == "cca_text":
+        if not value or len(value) > MAX_CCA_LENGTH:
+            await send_message(
+                conversation.telegram_id,
+                f"Enter a CCA name between 1 and {MAX_CCA_LENGTH} characters.",
+                _cancel_markup(),
+            )
+            return
+        data["requester_cca"] = value
+        conversation.step = "confirm" if editing else "activity_name"
+        _save(conversation, data)
+        db.commit()
+        await send_message(conversation.telegram_id, f"Your CCA has been recorded: {escape(value)}.")
+        if editing:
+            await _send_disposable_confirmation(db, conversation)
+        else:
+            await _prompt_disposable_step(conversation.telegram_id, conversation.step)
+        return
     if step == "activity_name":
         if not value or len(value) > 255:
             await send_message(conversation.telegram_id, "Enter an activity name between 1 and 255 characters.", _cancel_markup())
@@ -263,7 +263,15 @@ async def _disposable_message(db: Session, conversation: BotConversation, data: 
 
 
 async def _prompt_disposable_step(telegram_id: int, step: str) -> None:
+    if step == "cca_type":
+        await send_message(telegram_id, "What CCA are you requesting under?", {"inline_keyboard": [
+            [{"text": "CCA", "callback_data": "disp:cca:cca"},
+             {"text": "Personal use", "callback_data": "disp:cca:personal"}],
+            [{"text": "Cancel", "callback_data": "conv:cancel"}],
+        ]})
+        return
     prompts = {
+        "cca_text": "Type the name of the CCA you are requesting under.",
         "activity_name": "What is the activity or purpose of this request?",
         "cups": "How many cups are required?",
         "bowls": "How many bowls are required?",
@@ -283,41 +291,22 @@ async def _prompt_disposable_step(telegram_id: int, step: str) -> None:
     await send_message(telegram_id, prompts[step], markup)
 
 
-async def _send_committee_picker(telegram_id: int, committees: list[Committee], prefix: str, page: int) -> None:
-    total_pages = max(1, (len(committees) + PAGE_SIZE - 1) // PAGE_SIZE)
-    page = max(0, min(page, total_pages - 1))
-    rows = [[{"text": c.name, "callback_data": f"{prefix}:committee:{c.id}"}]
-            for c in committees[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]]
-    nav = []
-    if page:
-        nav.append({"text": "← Previous", "callback_data": f"{prefix}:committee-page:{page - 1}"})
-    if page + 1 < total_pages:
-        nav.append({"text": "Next →", "callback_data": f"{prefix}:committee-page:{page + 1}"})
-    if nav:
-        rows.append(nav)
-    rows.append([{"text": "Cancel", "callback_data": "conv:cancel"}])
-    await send_message(telegram_id, "Select your CCA:" if prefix == "reg" else "Select the CCA for this request:", {"inline_keyboard": rows})
-
-
 async def _send_registration_confirmation(db: Session, conversation: BotConversation) -> None:
     data = _payload(conversation)
-    committee = db.get(Committee, data.get("committee_id"))
     text = (
         "Please confirm your registration:\n\n"
         f"Name: <b>{escape(data.get('display_name', ''))}</b>\n"
-        f"Email: {escape(data.get('email', ''))}\n"
-        f"CCA: {escape(committee.name if committee else '')}"
+        f"Email: {escape(data.get('email', ''))}"
     )
     await send_message(conversation.telegram_id, text, _confirmation_markup("register"))
 
 
 async def _send_disposable_confirmation(db: Session, conversation: BotConversation) -> None:
     data = _payload(conversation)
-    committee = db.get(Committee, data.get("committee_id"))
     quantities = ", ".join(f"{item.title()}: {data.get(item, 0)}" for item in ITEMS)
     text = (
         "Please confirm your disposable request:\n\n"
-        f"CCA: {escape(committee.name if committee else '')}\n"
+        f"CCA: {escape(data.get('requester_cca', ''))}\n"
         f"Activity: <b>{escape(data.get('activity_name', ''))}</b>\n"
         f"{quantities}\n"
         f"Collection: {data.get('collection_date', '')} at {data.get('collection_time', '')}\n"
@@ -363,41 +352,24 @@ async def _conversation_callback(db: Session, conversation: BotConversation, cal
         return
     prefix, action = parts[0], parts[1]
     data = _payload(conversation)
-    if action == "committee-page":
-        if conversation.step != "committee" or len(parts) != 3:
+    if action == "cca" and prefix == "disp":
+        if conversation.step != "cca_type" or len(parts) != 3 or parts[2] not in ("cca", "personal"):
             await send_message(conversation.telegram_id, "That button is no longer active.")
             return
-        page = int(parts[2])
-        if prefix == "reg":
-            committees = db.query(Committee).order_by(Committee.name).all()
-        else:
-            user = db.query(User).filter(User.telegram_id == conversation.telegram_id).first()
-            committees = [m.committee for m in user.committee_memberships] if user else []
-        await _send_committee_picker(conversation.telegram_id, committees, prefix, page)
-        return
-    if action == "committee":
-        if conversation.step != "committee" or len(parts) != 3:
-            await send_message(conversation.telegram_id, "That button is no longer active.")
+        if parts[2] == "cca":
+            conversation.step = "cca_text"
+            _save(conversation, data)  # keeps the _editing flag for the typed answer
+            db.commit()
+            await _prompt_disposable_step(conversation.telegram_id, "cca_text")
             return
-        committee = db.get(Committee, int(parts[2]))
-        if not committee:
-            await send_message(conversation.telegram_id, "That CCA is no longer available.")
-            return
-        if prefix == "disp":
-            user = db.query(User).filter(User.telegram_id == conversation.telegram_id).first()
-            if not user or committee.id not in user.committee_ids:
-                await send_message(conversation.telegram_id, "That CCA is not assigned to your account.")
-                return
-        data["committee_id"] = committee.id
-        conversation.step = "confirm" if data.get("_editing") else ("confirm" if prefix == "reg" else "activity_name")
-        data.pop("_editing", None)
+        editing = bool(data.pop("_editing", False))
+        data["requester_cca"] = PERSONAL_CCA
+        conversation.step = "confirm" if editing else "activity_name"
         _save(conversation, data)
         db.commit()
-        if conversation.step == "confirm":
-            if prefix == "reg":
-                await _send_registration_confirmation(db, conversation)
-            else:
-                await _send_disposable_confirmation(db, conversation)
+        await send_message(conversation.telegram_id, "Your CCA has been recorded: personal use.")
+        if editing:
+            await _send_disposable_confirmation(db, conversation)
         else:
             await _prompt_disposable_step(conversation.telegram_id, conversation.step)
         return
@@ -420,20 +392,15 @@ async def _conversation_callback(db: Session, conversation: BotConversation, cal
             await send_message(conversation.telegram_id, "That button is no longer active.")
             return
         field = parts[2]
-        allowed = {"name", "email", "committee"} if prefix == "reg" else {"committee", "activity_name", *ITEMS, "collection_date", "collection_time", "description"}
+        allowed = {"name", "email"} if prefix == "reg" else {"cca", "activity_name", *ITEMS, "collection_date", "collection_time", "description"}
         if field not in allowed:
             return
         data["_editing"] = True
-        conversation.step = "name" if field == "name" else field
+        conversation.step = "name" if field == "name" else ("cca_type" if field == "cca" else field)
         _save(conversation, data)
         db.commit()
-        if field == "committee":
-            if prefix == "reg":
-                committees = db.query(Committee).order_by(Committee.name).all()
-            else:
-                user = db.query(User).filter(User.telegram_id == conversation.telegram_id).first()
-                committees = [m.committee for m in user.committee_memberships] if user else []
-            await _send_committee_picker(conversation.telegram_id, committees, prefix, 0)
+        if field == "cca":
+            await _prompt_disposable_step(conversation.telegram_id, "cca_type")
         elif prefix == "reg":
             await send_message(conversation.telegram_id, "Enter the new name:" if field == "name" else "Enter the new email:", _cancel_markup())
         else:
@@ -451,10 +418,10 @@ async def _conversation_callback(db: Session, conversation: BotConversation, cal
 
 async def _send_edit_menu(conversation: BotConversation) -> None:
     if conversation.flow == "register":
-        fields = (("name", "Name"), ("email", "Email"), ("committee", "CCA"))
+        fields = (("name", "Name"), ("email", "Email"))
         prefix = "reg"
     else:
-        fields = (("committee", "CCA"), ("activity_name", "Activity"), *((item, item.title()) for item in ITEMS),
+        fields = (("cca", "CCA"), ("activity_name", "Activity"), *((item, item.title()) for item in ITEMS),
                   ("collection_date", "Date"), ("collection_time", "Time"), ("description", "Description"))
         prefix = "disp"
     rows = [[{"text": label, "callback_data": f"{prefix}:edit:{field}"}] for field, label in fields]
@@ -464,10 +431,6 @@ async def _send_edit_menu(conversation: BotConversation) -> None:
 
 async def _submit_registration(db: Session, conversation: BotConversation) -> None:
     data = _payload(conversation)
-    committee = db.get(Committee, data.get("committee_id"))
-    if not committee:
-        await send_message(conversation.telegram_id, "Select a valid CCA before submitting.")
-        return
     duplicate = db.query(User).filter(User.email == data.get("email"), User.telegram_id != conversation.telegram_id).first()
     if duplicate:
         conversation.step = "email"
@@ -484,8 +447,6 @@ async def _submit_registration(db: Session, conversation: BotConversation) -> No
     user.telegram_username = data.get("telegram_username")
     user.role = UserRole.user
     user.status = UserStatus.pending
-    db.query(UserCommittee).filter(UserCommittee.user_id == user.id).delete()
-    db.add(UserCommittee(user_id=user.id, committee_id=committee.id))
     db.delete(conversation)
     try:
         db.commit()
@@ -493,23 +454,24 @@ async def _submit_registration(db: Session, conversation: BotConversation) -> No
         db.rollback()
         await send_message(conversation.telegram_id, "That email or Telegram username is already registered.")
         return
-    await notify_admins_registration_request(user, committee, committee_portfolio(committee))
+    await notify_admins_registration_request(user)
     await send_message(user.telegram_id, "Registration submitted. You will receive a message after an administrator reviews it.")
 
 
 async def _submit_disposable(db: Session, conversation: BotConversation) -> None:
     data = _payload(conversation)
     user = db.query(User).filter(User.telegram_id == conversation.telegram_id).first()
-    committee = db.get(Committee, data.get("committee_id"))
-    if not user or user.status != UserStatus.approved or not committee or committee.id not in user.committee_ids:
-        await send_message(conversation.telegram_id, "Your account or CCA assignment changed. Please cancel and start again.")
+    cca = (data.get("requester_cca") or "").strip()
+    if not user or user.status != UserStatus.approved or not cca:
+        await send_message(conversation.telegram_id, "Your account changed or the CCA is missing. Please cancel and start again.")
         return
     if not any(data.get(item, 0) > 0 for item in ITEMS):
         await send_message(conversation.telegram_id, "At least one quantity must be greater than zero.")
         return
     disposable = DisposableRequest(
         proposal_id=None,
-        committee_id=committee.id,
+        committee_id=None,
+        requester_cca=cca,
         requested_by=user.id,
         activity_name=data["activity_name"],
         description=data.get("description"),
@@ -525,8 +487,14 @@ async def _submit_disposable(db: Session, conversation: BotConversation) -> None
     await notify_admins_new_disposable_request(
         disposable.activity_name,
         user.display_name or user.email,
-        committee_portfolio(committee),
+        None,  # no portfolio: alert every ID in the admin settings
         disposable.id,
+        telegram_username=user.telegram_username,
+        cca=cca,
+        quantities={item: data.get(item, 0) for item in ITEMS},
+        collection_date=disposable.collection_date.isoformat(),
+        collection_time=disposable.collection_time.isoformat(timespec="minutes"),
+        description=disposable.description,
     )
     await send_message(user.telegram_id, f"Disposable request #{disposable.id} submitted for approval.")
 
@@ -576,8 +544,7 @@ async def _admin_callback(db: Session, telegram_id: int, callback_data: str) -> 
         await send_message(telegram_id, f"Disposable request #{target_id} is approved.")
     elif subject == "reg":
         user = db.query(User).filter(User.id == target_id).with_for_update().first()
-        committee = user.committee_memberships[0].committee if user and user.committee_memberships else None
-        if not user or not committee or not admin_can_access_committee(admin, committee):
+        if not user:
             await send_message(telegram_id, "Registration not found.")
             return
         if user.status == UserStatus.rejected:
@@ -623,8 +590,7 @@ async def _finish_admin_rejection(db: Session, conversation: BotConversation, re
         await send_message(admin.telegram_id, f"Disposable request #{target_id} is rejected.")
         return
     user = db.query(User).filter(User.id == target_id).with_for_update().first()
-    committee = user.committee_memberships[0].committee if user and user.committee_memberships else None
-    if not user or not committee or not admin_can_access_committee(admin, committee):
+    if not user:
         db.delete(conversation)
         db.commit()
         await send_message(admin.telegram_id, "Registration not found.")

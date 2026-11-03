@@ -64,7 +64,7 @@ def disposable_api(monkeypatch):
         UserCommittee(user_id=requester.id, committee_id=social.id),
         UserCommittee(user_id=welfare_requester.id, committee_id=welfare.id),
     ])
-    social_request = DisposableRequest(
+    social_request = DisposableRequest(requester_cca="Test CCA", 
         committee_id=social.id,
         requested_by=requester.id,
         activity_name="Social Night",
@@ -73,7 +73,7 @@ def disposable_api(monkeypatch):
         collection_date=date.today() + timedelta(days=1),
         status=DisposableStatus.pending,
     )
-    welfare_request = DisposableRequest(
+    welfare_request = DisposableRequest(requester_cca="Test CCA", 
         committee_id=welfare.id,
         requested_by=welfare_requester.id,
         activity_name="Care Packs",
@@ -121,7 +121,35 @@ def test_standalone_requests_are_serialized_and_portfolio_scoped(disposable_api)
     assert admin_response.status_code == 200
     ids = {item["id"] for item in admin_response.json()}
     assert social_id in ids
-    assert welfare_id not in ids
+    assert welfare_id in ids  # admins are no longer scoped by portfolio
+
+
+def test_admin_sees_requests_with_no_committee_in_list_and_today(disposable_api):
+    client, Session, _, _, _, _ = disposable_api
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from api.config import get_settings
+
+    today = datetime.now(ZoneInfo(get_settings().app_timezone)).date()
+    with Session() as db:
+        requester = db.query(User).filter_by(telegram_id=1101).one()
+        request = DisposableRequest(
+            committee_id=None, requester_cca="personal", requested_by=requester.id,
+            activity_name="Birthday", cups=5, collection_date=today, status=DisposableStatus.approved,
+        )
+        db.add(request)
+        db.commit()
+        request_id = request.id
+
+    listed = client.get("/api/disposables", headers=auth(999))
+    assert listed.status_code == 200
+    match = [item for item in listed.json() if item["id"] == request_id]
+    assert match and match[0]["committee_id"] is None and match[0]["committee_name"] == "personal"
+
+    due_today = client.get("/api/disposables/today", headers=auth(999))
+    assert due_today.status_code == 200
+    assert request_id in {item["id"] for item in due_today.json()}
 
 
 def test_decision_endpoint_is_idempotent_and_rejects_conflicts(disposable_api):

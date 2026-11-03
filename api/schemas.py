@@ -223,7 +223,7 @@ class DisposableRequestOut(BaseModel):
 
     id: int
     proposal_id: int | None
-    committee_id: int
+    committee_id: int | None
     proposal_title: str
     activity_name: str
     description: str | None
@@ -342,7 +342,7 @@ class ReminderUnreadCount(BaseModel):
 
 class BorrowRequestOut(BaseModel):
     id: int
-    committee_id: int
+    committee_id: int | None
     committee_name: str
     requested_by: int
     requester_name: str | None

@@ -52,7 +52,7 @@ def test_migration_chain_has_a_single_head():
     root = Path(__file__).resolve().parent.parent
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "migrations"))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0029"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0030"]
 
 
 def test_rls_migration_sql_has_no_percent_signs_and_targets_the_public_schema():
@@ -74,3 +74,27 @@ def test_rls_migration_sql_has_no_percent_signs_and_targets_the_public_schema():
     with Operations.context(context):
         module.downgrade()
     assert "DISABLE ROW LEVEL SECURITY" in buffer.getvalue()
+
+
+def test_cca_text_migration_backfills_committee_names_and_allows_null_committee():
+    from sqlalchemy import text
+
+    path = Path(__file__).resolve().parent.parent / "migrations" / "versions" / "0030_request_cca_text.py"
+    spec = importlib.util.spec_from_file_location("migration_0030", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert (module.revision, module.down_revision) == ("0030", "0029")
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE committees (id INTEGER PRIMARY KEY, name VARCHAR(100))"))
+        connection.execute(text("INSERT INTO committees VALUES (1, 'Block 3')"))
+        for table in module.TABLES:
+            connection.execute(text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, committee_id INTEGER NOT NULL)"))
+            connection.execute(text(f"INSERT INTO {table} VALUES (1, 1)"))
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            module.upgrade()
+        for table in module.TABLES:
+            assert connection.execute(text(f"SELECT requester_cca FROM {table}")).scalar() == "Block 3"
+            connection.execute(text(f"INSERT INTO {table} (id, committee_id, requester_cca) VALUES (2, NULL, 'personal')"))
