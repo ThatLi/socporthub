@@ -394,16 +394,6 @@ export async function renderProposalDetail(root, user, proposalId, navigate) {
     <div id="disposable-slot"></div>
 
     ${
-      // Only shown alongside an actual admin action button below — otherwise it's a
-      // dead field with nothing to attach the note to.
-      adminHasAction
-        ? `<div class="field" style="margin-top:16px">
-             <label for="status-comment">Note to submitter (optional)</label>
-             <textarea id="status-comment" placeholder="Explain what needs to change, or add context…"></textarea>
-           </div>`
-        : ""
-    }
-    ${
       // Submitting/resubmitting is the owner's action; advancing past in_review is
       // the admin's call — never show the other party a button for a step that isn't theirs.
       (canOwnerSubmit || (adminHasAction && (proposal.status !== "in_review" || !usesEmailWorkflow))) && nextStatus

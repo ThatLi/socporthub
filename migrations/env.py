@@ -8,7 +8,8 @@ from api.config import get_settings
 from api import models  # noqa: F401  ensure models are registered on Base.metadata
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# DATABASE_URL_DIRECT (session pooler/direct) when set, else DATABASE_URL.
+config.set_main_option("sqlalchemy.url", get_settings().migration_database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

@@ -1,12 +1,16 @@
 import asyncio
+from contextlib import contextmanager
 from html import unescape
 from html.parser import HTMLParser
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import httpx
 import pytest
 
+from api.database import get_db
+from api.main import app
+from api.models import BotConversation
 from api.services import telegram
 from bot import handlers
 
@@ -26,7 +30,7 @@ def test_help_sends_valid_html_without_username_lookup(monkeypatch, text):
     send.assert_awaited_once_with(123, handlers.HELP_TEXT)
     lookup.assert_not_awaited()
     HelpHTMLParser().feed(send.call_args.args[1])
-    for usage in ("/approve <id>", "/reject <id>", "/remind <message>"):
+    for usage in ("/approve <id>", "/reject <id>", "/remind <message>", "/deleteborrow <id>"):
         assert usage in unescape(send.call_args.args[1])
 
 
@@ -36,19 +40,22 @@ def test_help_sends_valid_html_without_username_lookup(monkeypatch, text):
     ("OtherBot", "SocialPortHubBot", 0),
     ("SocialPortHubBot", None, 0),
 ])
-def test_addressed_help_checks_recipient_and_preserves_conversation(monkeypatch, recipient, username, replies):
+def test_addressed_help_checks_recipient_and_preserves_conversation(client, monkeypatch, recipient, username, replies):
     send = AsyncMock()
     monkeypatch.setattr(handlers, "send_message", send)
     monkeypatch.setattr(handlers, "get_bot_username", AsyncMock(return_value=username))
-    state = {"flow": "register", "step": "name"}
-    monkeypatch.setattr(handlers, "_conversation", {123: state.copy()})
-    asyncio.run(handlers.handle_update({"message": {
-        "chat": {"id": 123, "type": "supergroup"}, "text": f"/help@{recipient}",
-    }}))
+    with contextmanager(app.dependency_overrides[get_db])() as db:
+        conversation = BotConversation(telegram_id=123, flow="register", step="name", payload="{}")
+        db.add(conversation)
+        db.commit()
+        asyncio.run(handlers.handle_update({"message": {
+            "chat": {"id": 123, "type": "supergroup"}, "text": f"/help@{recipient}",
+        }}))
+        db.refresh(conversation)
+        assert (conversation.flow, conversation.step, conversation.payload) == ("register", "name", "{}")
     assert send.await_count == replies
     if replies:
         send.assert_awaited_once_with(123, handlers.HELP_TEXT)
-    assert handlers._conversation[123] == state
 
 
 def test_addressed_command_preserves_arguments(monkeypatch):
@@ -59,6 +66,25 @@ def test_addressed_command_preserves_arguments(monkeypatch):
         "chat": {"id": 123}, "text": "/remind@SocialPortHubBot Please review my proposal",
     }}))
     remind.assert_awaited_once_with(123, "Please review my proposal")
+
+
+@pytest.mark.parametrize("suffix", ["", "@SocialPortHubBot", "@OtherBot"])
+@pytest.mark.parametrize("command,handler,args", [
+    ("/cancel", "cancel_conversation", ()),
+    ("/register", "start_registration", ("new_user",)),
+])
+def test_merged_conversation_commands(client, monkeypatch, suffix, command, handler, args):
+    action = AsyncMock()
+    monkeypatch.setattr(handlers, handler, action)
+    monkeypatch.setattr(handlers, "SessionLocal", contextmanager(app.dependency_overrides[get_db]))
+    monkeypatch.setattr(handlers, "get_bot_username", AsyncMock(return_value="SocialPortHubBot"))
+    asyncio.run(handlers.handle_update({"message": {
+        "chat": {"id": 123}, "from": {"username": "new_user"}, "text": command + suffix,
+    }}))
+    if suffix == "@OtherBot":
+        action.assert_not_awaited()
+    else:
+        action.assert_awaited_once_with(ANY, 123, *args)
 
 
 @pytest.mark.parametrize("status,payload,expected", [

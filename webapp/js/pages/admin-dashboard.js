@@ -1,3 +1,4 @@
+import { ICONS, STATUS_ICON } from "../components/icons.js";
 import { api } from "../api.js";
 import { statusBadge } from "../components/status-badge.js";
 import { proposalCard } from "../components/proposal-card.js";
@@ -25,6 +26,7 @@ export async function renderAdminDashboard(root, tab = "proposals") {
     <div class="chip-row" id="section-tabs">
       <div class="chip ${tab === "proposals" ? "active" : ""}" data-tab="proposals">Proposals</div>
       <div class="chip ${tab === "disposables" ? "active" : ""}" data-tab="disposables">Disposables</div>
+      <div class="chip ${tab === "borrowing" ? "active" : ""}" data-tab="borrowing">Borrowing</div>
       <div class="chip ${tab === "users" ? "active" : ""}" data-tab="users">Users</div>
     </div>
     <div id="section-content"><div class="loading">Loading…</div></div>
@@ -39,6 +41,8 @@ export async function renderAdminDashboard(root, tab = "proposals") {
     await renderUsersSection(content);
   } else if (tab === "disposables") {
     await renderDisposablesSection(content);
+  } else if (tab === "borrowing") {
+    await renderBorrowingSection(content);
   } else {
     await renderProposalsSection(content);
   }
@@ -63,7 +67,7 @@ async function renderDisposablesSection(content) {
   content.innerHTML = dates
     .map((d) => {
       const items = byDate.get(d);
-      const totals = items.reduce(
+      const totals = items.filter((item) => item.status !== "rejected").reduce(
         (acc, r) => ({
           plates: acc.plates + r.plates,
           cups: acc.cups + r.cups,
@@ -83,15 +87,16 @@ async function renderDisposablesSection(content) {
               (r) => `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-top:1px solid var(--border);">
               <div>
-                <div style="font-size:13px; font-weight:600;">${escapeHtml(r.proposal_title)}</div>
-                <div style="font-size:12px; color:var(--text-muted)">${escapeHtml(r.committee_name)} · ${escapeHtml(r.requester_name || "")}${r.requester_cca ? ` · ${escapeHtml(r.requester_cca)}` : ""}</div>
+                <div style="font-size:13px; font-weight:600;">${escapeHtml(r.activity_name || r.proposal_title)}</div>
+                <div style="font-size:12px; color:var(--text-muted)">${escapeHtml(r.committee_name)} · ${escapeHtml(r.requester_name || "")}</div>
                 ${r.description ? `<div style="font-size:12px; margin-top:4px;">${escapeHtml(r.description)}</div>` : ""}
+                ${r.rejection_reason ? `<div style="font-size:12px; color:var(--red-text); margin-top:4px;">Reason: ${escapeHtml(r.rejection_reason)}</div>` : ""}
               </div>
               ${
-                r.approved
+                r.status === "approved"
                   ? `<span><span class="badge badge-approved">Approved</span> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
-                  : r.rejected
-                    ? `<span><span class="badge">Rejected</span> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
+                  : r.status === "rejected"
+                    ? `<span><span class="badge badge-rejected">Rejected</span> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
                     : `<span><button class="btn" style="width:auto; padding:6px 14px;" data-approve-disposable="${r.id}">Approve</button> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-reject-disposable="${r.id}">Reject</button> <button class="btn btn-secondary" style="width:auto; padding:6px 14px;" data-delete-disposable="${r.id}">Delete</button></span>`
               }
             </div>`
@@ -105,14 +110,19 @@ async function renderDisposablesSection(content) {
   content.querySelectorAll("[data-approve-disposable]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       btn.disabled = true;
-      await api.patch(`/api/disposables/${btn.dataset.approveDisposable}`, { approved: true });
+      await api.post(`/api/disposables/${btn.dataset.approveDisposable}/decision`, { status: "approved" });
       renderDisposablesSection(content);
     });
   });
   content.querySelectorAll("[data-reject-disposable]").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      const reason = window.prompt("Optional rejection reason:", "");
+      if (reason === null) return;
       btn.disabled = true;
-      await api.patch(`/api/disposables/${btn.dataset.rejectDisposable}`, { approved: false });
+      await api.post(`/api/disposables/${btn.dataset.rejectDisposable}/decision`, {
+        status: "rejected",
+        reason: reason.trim() || null,
+      });
       renderDisposablesSection(content);
     });
   });
@@ -153,7 +163,7 @@ async function renderProposalsSection(content, committeeId = null, statusFilter 
 
     <div class="summary-grid">
       ${Object.entries(STATUS_LABELS)
-        .map(([key, label]) => `<div class="summary-card"><div class="count">${summary[key] ?? 0}</div><div class="label">${label}</div></div>`)
+        .map(([key, label]) => `<div class="summary-card" data-status="${key}"><span class="icon-bubble">${ICONS[STATUS_ICON[key]]}</span><div class="count">${summary[key] ?? 0}</div><div class="label">${label}</div></div>`)
         .join("")}
     </div>
 
@@ -181,7 +191,7 @@ async function renderProposalsSection(content, committeeId = null, statusFilter 
 async function renderUsersSection(content) {
   const [users, committees] = await Promise.all([
     api.get("/api/admin/users"),
-    api.get("/api/committees?all_committees=true"),
+    api.get("/api/committees"),
   ]);
 
   const pending = users.filter((u) => u.status === "pending");
@@ -346,4 +356,126 @@ function userRow(user, committees, { pendingActions }) {
       }
     </div>
   `;
+}
+
+
+// --- Borrowing: where the foldable tables and cambro are, plus decisions ---
+
+function fmtDate(iso) {
+  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function borrowItems(r) {
+  const parts = [];
+  if (r.tables) parts.push(`${r.tables} table${r.tables === 1 ? "" : "s"}`);
+  if (r.cambro) parts.push("cambro");
+  return parts.join(" + ");
+}
+
+function borrowCard(r) {
+  const who = escapeHtml(r.requester_name || "Unknown") + (r.requester_telegram_username ? ` (${escapeHtml(r.requester_telegram_username)})` : "");
+  const overdue = r.overdue ? `<span class="borrow-overdue">Overdue</span>` : "";
+  let actions = "";
+  if (r.status === "pending") {
+    actions = `<div class="btn-row borrow-actions">
+      <button class="btn" data-borrow-approve="${r.id}">Approve</button>
+      <button class="btn btn-secondary" data-borrow-reject="${r.id}">Reject</button></div>`;
+  } else if (r.status === "return_submitted") {
+    actions = `<div class="btn-row borrow-actions">
+      <button class="btn" data-borrow-confirm="${r.id}">Confirm returned</button>
+      <button class="btn btn-secondary" data-borrow-notyet="${r.id}">Not yet</button></div>`;
+  }
+  return `
+    <div class="card borrow-card" data-borrow-id="${r.id}">
+      <div class="title">${escapeHtml(r.activity_name)}</div>
+      <div class="borrow-items">${borrowItems(r)}</div>
+      <div class="borrow-meta"><span>${who} · ${escapeHtml(r.committee_name)}</span>${statusBadge(r.status)}</div>
+      <div class="borrow-meta"><span>${fmtDate(r.borrow_date)} → ${fmtDate(r.return_date)}</span>${overdue}</div>
+      ${r.rejection_reason ? `<div class="borrow-meta"><span>Reason: ${escapeHtml(r.rejection_reason)}</span></div>` : ""}
+      ${r.has_proof ? `<img class="borrow-proof" data-proof-id="${r.id}" alt="Return proof" />` : ""}
+      ${actions}
+      <div class="borrow-delete-row"><button class="btn btn-secondary borrow-delete" data-borrow-delete="${r.id}">Delete</button></div>
+    </div>`;
+}
+
+async function renderBorrowingSection(content) {
+  const [summary, requests] = await Promise.all([api.get("/api/borrow/summary"), api.get("/api/borrow")]);
+
+  const tiles = summary.items
+    .map((i) => `<div class="summary-card" data-status="${i.out ? "needs_action" : "finished"}">
+        <div class="count">${i.out}/${i.total}</div><div class="label">${escapeHtml(i.label)} out</div></div>`)
+    .join("");
+  const extra = `<div class="summary-card" data-status="in_review"><div class="count">${summary.pending}</div><div class="label">Need a decision</div></div>
+    <div class="summary-card" data-status="submitted"><div class="count">${summary.awaiting_confirmation}</div><div class="label">Awaiting confirm</div></div>`;
+
+  const groups = [
+    ["Needs your decision", requests.filter((r) => r.status === "pending")],
+    ["Return photo to confirm", requests.filter((r) => r.status === "return_submitted")],
+    ["Out or upcoming", requests.filter((r) => r.status === "approved")],
+    ["History", requests.filter((r) => ["returned", "rejected"].includes(r.status)).slice(0, 15)],
+  ].filter(([, rows]) => rows.length);
+
+  content.innerHTML = `
+    <div class="summary-grid">${tiles}${extra}</div>
+    ${
+      groups.length
+        ? groups.map(([title, rows]) => `<h2 class="borrow-group-title">${title}</h2>${rows.map(borrowCard).join("")}`).join("")
+        : `<div class="empty-state"><div class="icon">📦</div><p>No borrow requests yet. Members request with /borrow in the bot.</p></div>`
+    }
+    <div id="borrow-error"></div>`;
+
+  const errorBox = content.querySelector("#borrow-error");
+  const refresh = () => renderBorrowingSection(content);
+  const act = async (fn) => {
+    try {
+      await fn();
+      await refresh();
+    } catch (e) {
+      errorBox.innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
+    }
+  };
+
+  // Load return photos through the authenticated API (an <img src> can't send initData).
+  content.querySelectorAll("[data-proof-id]").forEach(async (img) => {
+    try {
+      const { blob } = await api.getBlob(`/api/borrow/${img.dataset.proofId}/proof`);
+      const url = URL.createObjectURL(blob);
+      img.src = url;
+      img.addEventListener("click", () => window.open(url, "_blank"));
+    } catch {
+      img.remove();
+    }
+  });
+
+  const on = (selector, attr, handler) =>
+    content.querySelectorAll(selector).forEach((el) => el.addEventListener("click", () => handler(Number(el.getAttribute(attr)), el)));
+
+  on("[data-borrow-approve]", "data-borrow-approve", (id) =>
+    act(() => api.post(`/api/borrow/${id}/decision`, { status: "approved" })));
+  on("[data-borrow-confirm]", "data-borrow-confirm", (id) =>
+    act(() => api.post(`/api/borrow/${id}/return`, { confirmed: true })));
+  on("[data-borrow-notyet]", "data-borrow-notyet", (id) =>
+    act(() => api.post(`/api/borrow/${id}/return`, { confirmed: false })));
+  on("[data-borrow-delete]", "data-borrow-delete", (id, button) => {
+    const row = button.closest(".borrow-delete-row");
+    row.innerHTML = `<div class="borrow-reject-form">
+      <p class="field-hint">Deleting stops this request's reminders and tells the borrower. Add an optional reason for them:</p>
+      <textarea id="delete-reason-${id}" placeholder="Reason (optional)" maxlength="1000"></textarea>
+      <button class="btn" data-confirm-delete="${id}">Confirm delete</button></div>`;
+    content.querySelector(`[data-confirm-delete="${id}"]`).addEventListener("click", () =>
+      act(() => api.post(`/api/borrow/${id}/delete`, {
+        reason: content.querySelector(`#delete-reason-${id}`).value.trim() || null,
+      })));
+  });
+  on("[data-borrow-reject]", "data-borrow-reject", (id, button) => {
+    const row = button.closest(".borrow-actions");
+    row.outerHTML = `<div class="borrow-reject-form">
+      <textarea id="reject-reason-${id}" placeholder="Reason (optional)" maxlength="1000"></textarea>
+      <button class="btn" data-confirm-reject="${id}">Confirm rejection</button></div>`;
+    content.querySelector(`[data-confirm-reject="${id}"]`).addEventListener("click", () =>
+      act(() => api.post(`/api/borrow/${id}/decision`, {
+        status: "rejected",
+        reason: content.querySelector(`#reject-reason-${id}`).value.trim() || null,
+      })));
+  });
 }

@@ -129,6 +129,28 @@ pytest
 5. Add your own numeric Telegram user ID to `ADMIN_TELEGRAM_IDS` (comma-separated) so you
    land in the admin dashboard instead of the registration flow.
 
+The bot supports persistent `/register` and `/disposable` conversations. Users can use
+`/cancel` (or the inline Cancel button) at any step; unfinished conversations remain in
+the database until they are submitted or cancelled. Registration and disposable
+decisions are available from both Telegram inline buttons and the admin WebApp.
+
+### Borrowing tables and the cambro
+
+`/borrow` lets an approved member request the shared foldable tables (4) and the cambro
+drink dispenser (1) for a date range. Any admin gets the request with Approve/Reject
+buttons; the bot refuses quantities that aren't free for the chosen dates, and approval
+re-checks availability. Items count as out until the owner confirms they are back.
+Borrowers prove a return with `/return` and a photo (also offered as a button in their
+reminders); the owner gets the photo with Confirm returned / Not yet buttons, and the
+photo is kept for the admin WebApp's **Borrowing** tab. Admins can send `/borrowed` for
+where every item is right now. Borrowers are reminded the day before and on the return
+date, then daily when overdue (production only, after `COLLECTION_REMINDER_HOUR`), and
+admins get an overdue digest. Admins can delete any request (`/deleteborrow <id>`, the
+Delete buttons under `/borrowed`, or the Borrowing tab) with an optional reason: it removes
+the row so its reminders stop, tells the borrower (unless it was already returned/rejected
+history), and tells the other admins. The inventory totals live in
+`api/services/borrowing.py:ITEM_TOTALS`.
+
 ## Calendar
 
 Events live entirely in our own Postgres table (`calendar_events`) — created, listed,
@@ -148,6 +170,14 @@ on that URL — this keeps the feed from being trivially guessable by outsiders,
 to how Google Calendar's own "secret address in iCal format" works. Leave it blank to
 serve the feed with no token (fine for local dev).
 
+## Database on Supabase
+
+Set `DATABASE_URL` to Supabase's **transaction pooler** (port 6543); the app then uses no
+connection pool of its own. Set `DATABASE_URL_DIRECT` to the **session pooler** (port 5432,
+same host and user) so `alembic upgrade head` uses it instead. Add `?sslmode=require` to
+both. Migration `0029` enables row-level security on every table; turn the Data API off in
+the Supabase dashboard as well, and enable RLS in any migration that adds a table.
+
 ## Deployment (Railway)
 
 1. New Railway project → add a PostgreSQL plugin → copy its `DATABASE_URL`.
@@ -160,9 +190,9 @@ serve the feed with no token (fine for local dev).
 
 ```
 api/         FastAPI app, models, routes, services (Telegram, Resend, Google Docs/Drive/Forms)
-bot/         Telegram webhook update handling (/start, /help, /status, /remind) + outbound notifications
+bot/         Telegram commands and persistent registration/disposable conversations + outbound notifications
 webapp/      Vanilla JS SPA (Telegram WebApp UI)
-migrations/  Alembic (22 migrations, schema history)
+migrations/  Alembic (24 migrations, schema history)
 docs/        Feature-specific operational docs (e.g. grading setup)
 tests/       pytest — auth, proposals, calendar/disposables, grading
 ```

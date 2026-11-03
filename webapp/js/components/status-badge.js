@@ -9,6 +9,8 @@ const LABELS = {
   pending: "Pending",
   approved: "Approved",
   rejected: "Rejected",
+  return_submitted: "Return sent",
+  returned: "Returned",
 };
 
 export function statusBadge(status) {
