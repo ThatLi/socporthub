@@ -52,7 +52,7 @@ def test_migration_chain_has_a_single_head():
     root = Path(__file__).resolve().parent.parent
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "migrations"))
-    assert ScriptDirectory.from_config(config).get_heads() == ["0030"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0031"]
 
 
 def test_rls_migration_sql_has_no_percent_signs_and_targets_the_public_schema():

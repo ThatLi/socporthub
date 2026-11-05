@@ -197,6 +197,7 @@ class ProposalComment(Base):
     reply_to_comment_id: Mapped[int | None] = mapped_column(ForeignKey("proposal_comments.id"), nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     proposal: Mapped["Proposal"] = relationship(back_populates="comments")
     author: Mapped["User"] = relationship()
