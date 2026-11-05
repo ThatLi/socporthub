@@ -26,3 +26,13 @@ Implementation sequence:
 Deploy migration 0031 before the updated application. Rolling back the migration
 removes deletion markers and makes retained bodies visible again; avoid downgrading
 after this feature is in use without deciding how to preserve those markers.
+
+Validation:
+- Run `.venv313/Scripts/python.exe -m pytest tests -q -p no:cacheprovider`.
+  The feature adds six passing tests. The full suite has 132 passes and the same
+  13 failures reproduced against the original commit `7988383` (126 passes).
+- Run `node tests/comment-deletion.test.cjs` for four dependency-free rendering
+  and interaction tests: ownership controls, deleted previews, confirmation,
+  pending/failed requests, and draft preservation.
+- The migration test upgrades and downgrades an existing SQLite comment table.
+  Live PostgreSQL migration and browser/Telegram device checks were not performed.

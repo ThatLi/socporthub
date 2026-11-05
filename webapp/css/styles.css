@@ -630,6 +630,9 @@ a.card:active { transform: scale(0.98); }
 .comment-content p { margin: var(--space-2) 0 0; color: var(--text); white-space: pre-wrap; }
 .comment-reply-context, .comment-replying { margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border-left: 3px solid var(--amber-text); border-radius: 0 var(--radius) var(--radius) 0; background: #fffbeb; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
 .comment-reply { margin-top: var(--space-2); padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.comment-delete { margin-top: var(--space-2); padding: 4px 0; border: 0; background: none; color: var(--red-text); font: inherit; font-size: 12px; cursor: pointer; }
+.comment-delete:disabled { opacity: .5; cursor: wait; }
+.comment-content .comment-deleted { color: var(--text-muted); font-style: italic; }
 .comments-empty { padding: var(--space-3); border: 1px dashed var(--border); border-radius: var(--radius); }
 .comment-form { margin-top: var(--space-2); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); background: #f9fafb; }
 .comment-form label { display: block; margin-bottom: var(--space-2); font-size: 13px; font-weight: 600; }

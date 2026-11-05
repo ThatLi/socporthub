@@ -565,9 +565,10 @@ async function renderCommentsSection(slot, user, proposal) {
             <div class="comment-rail"><span class="comment-dot"></span></div>
             <div class="comment-content">
               <div class="comment-meta"><strong>${escapeHtml(comment.author_name)}</strong><span>${isAdminComment ? "Admin" : "Submitter"}</span><time>${new Date(comment.created_at).toLocaleString()}</time></div>
-              ${parent ? `<div class="comment-reply-context">Replying to ${escapeHtml(parent.author_name)}: “${escapeHtml(parent.body)}”</div>` : ""}
-              <p>${escapeHtml(comment.body)}</p>
-              ${canReplyToAdmin && isAdminComment ? `<button type="button" class="comment-reply" data-reply-to="${comment.id}">Reply to this comment</button>` : ""}
+              ${parent && !comment.deleted_at ? `<div class="comment-reply-context" data-reply-context-for="${parent.id}">Replying to ${escapeHtml(parent.author_name)}: “${escapeHtml(parent.deleted_at ? "This comment was deleted." : parent.body)}”</div>` : ""}
+              <p class="comment-body${comment.deleted_at ? " comment-deleted" : ""}">${escapeHtml(comment.deleted_at ? "This comment was deleted." : comment.body)}</p>
+              ${canReplyToAdmin && isAdminComment && !comment.deleted_at ? `<button type="button" class="comment-reply" data-reply-to="${comment.id}">Reply to this comment</button>` : ""}
+              ${user.role === "admin" && comment.author_id === user.id && !comment.deleted_at ? `<button type="button" class="comment-delete" data-delete-comment="${comment.id}" aria-label="Delete your comment from ${escapeHtml(new Date(comment.created_at).toLocaleString())}">Delete</button>` : ""}
             </div>
           </article>`;
         }).join("")
@@ -575,6 +576,7 @@ async function renderCommentsSection(slot, user, proposal) {
     slot.innerHTML = `<section class="card comments-card">
       <div class="comments-heading"><div><h3>Comments & review history</h3><p>Keep questions and requested changes here so everyone can follow the proposal.</p></div></div>
       <div class="comment-thread">${commentHtml}</div>
+      <div id="comment-action-error" role="alert"></div>
       <form class="comment-form" id="comment-form">
         <div class="comment-replying" hidden></div>
         <label for="new-comment">${canReplyToAdmin ? "Reply or add a comment" : "Add a comment"}</label>
@@ -589,6 +591,29 @@ async function renderCommentsSection(slot, user, proposal) {
     const textarea = slot.querySelector("#new-comment");
     const replyInput = slot.querySelector("#reply-to-comment");
     const replying = slot.querySelector(".comment-replying");
+    slot.querySelectorAll("[data-delete-comment]").forEach((button) => button.addEventListener("click", async () => {
+      if (!window.confirm("Delete this comment? Its text will be hidden in the app. Telegram copies will remain.")) return;
+      const error = slot.querySelector("#comment-action-error");
+      button.disabled = true;
+      error.textContent = "";
+      try {
+        await api.delete(`/api/proposals/${proposal.id}/comments/${button.dataset.deleteComment}`);
+        const article = button.closest(".comment-item");
+        const body = article.querySelector(".comment-body");
+        body.textContent = "This comment was deleted.";
+        body.classList.add("comment-deleted");
+        article.querySelector(".comment-reply-context")?.remove();
+        article.querySelector("[data-reply-to]")?.remove();
+        const comment = commentById.get(Number(button.dataset.deleteComment));
+        slot.querySelectorAll(`[data-reply-context-for="${comment.id}"]`).forEach((context) => {
+          context.textContent = `Replying to ${comment.author_name}: “This comment was deleted.”`;
+        });
+        button.remove();
+      } catch (err) {
+        error.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+        button.disabled = false;
+      }
+    }));
     slot.querySelectorAll("[data-reply-to]").forEach((button) => button.addEventListener("click", () => {
       const comment = commentById.get(Number(button.dataset.replyTo));
       replyInput.value = comment.id;
