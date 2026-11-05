@@ -7,7 +7,7 @@ from fastapi import Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user
+from api.auth import get_current_admin, get_current_user
 from api.config import get_settings
 from api.database import get_db
 from api.models import (
@@ -144,7 +144,7 @@ def list_proposals(
         unread = sum(
             1
             for comment in comments
-            if comment.author_id != user.id
+            if comment.deleted_at is None and comment.author_id != user.id
             and (
                 user.role == UserRole.admin
                 or (proposal.submitted_by == user.id and comment.author.role == UserRole.admin)
@@ -502,6 +502,8 @@ async def announce_proposal(
 
 def _comment_to_out(c: ProposalComment) -> ProposalCommentOut:
     out = ProposalCommentOut.model_validate(c)
+    if c.deleted_at is not None:
+        out.body = "This comment was deleted."
     out.author_name = c.author.display_name or c.author.email
     out.author_role = c.author.role
     return out
@@ -540,6 +542,26 @@ def mark_comments_read(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.delete("/{proposal_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_comment(
+    proposal_id: int,
+    comment_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_admin),
+) -> Response:
+    proposal = get_visible_proposal(db, user, proposal_id)
+    comment = db.get(ProposalComment, comment_id)
+    if not comment or comment.proposal_id != proposal.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Comment not found")
+    if comment.author_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only delete your own comments")
+    db.query(ProposalComment).filter(
+        ProposalComment.id == comment.id, ProposalComment.deleted_at.is_(None)
+    ).update({ProposalComment.deleted_at: datetime.now(timezone.utc)})
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/{proposal_id}/status-history", response_model=list[ProposalStatusHistoryOut])
 def list_status_history(
     proposal_id: int,
@@ -570,6 +592,8 @@ async def add_comment(
         parent = db.get(ProposalComment, req.reply_to_comment_id)
         if not parent or parent.proposal_id != proposal.id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "The comment being replied to was not found")
+        if parent.deleted_at is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot reply to a deleted comment")
     comment = ProposalComment(
         proposal_id=proposal.id,
         author_id=user.id,

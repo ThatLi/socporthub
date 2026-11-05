@@ -181,6 +181,7 @@ class ProposalCommentOut(BaseModel):
     reply_to_comment_id: int | None = None
     body: str
     created_at: datetime
+    deleted_at: datetime | None = None
 
 
 class ProposalStatusHistoryOut(BaseModel):
